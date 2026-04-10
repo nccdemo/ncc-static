@@ -1,0 +1,191 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Premium SaaS tokens (Stripe/Linear-like) */
+    --radius: 1rem; /* 16px cards */
+
+    /* Palette (HSL) */
+    --background: 210 20% 98%; /* #f9fafb */
+    --foreground: 222 47% 11%; /* #111827 */
+
+    --card: 0 0% 100%; /* #ffffff */
+    --card-foreground: 222 47% 11%;
+
+    --primary: 221 83% 53%; /* #2563eb */
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 20% 96%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 210 20% 96%;
+    --muted-foreground: 215 14% 40%; /* ~#6b7280 */
+
+    --accent: 210 20% 96%;
+    --accent-foreground: 222 47% 11%;
+
+    --destructive: 0 72% 51%; /* #dc2626 */
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 13% 91%; /* #e5e7eb */
+    --input: 220 13% 91%;
+    --ring: 221 83% 53%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-family: Inter, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, 'Noto Sans', 'Apple Color Emoji', 'Segoe UI Emoji';
+  @apply bg-background text-foreground;
+}
+
+/* Premium soft app backdrop (subtle gradient) */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(circle at top left, #eef2ff, #f9fafb);
+  pointer-events: none;
+}
+
+/* Sidebar nav: premium hover + active (no logic changes) */
+.sidebar-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-radius: 12px;
+  padding: 8px 12px;
+  font-size: 14px;
+  transition: all 0.2s ease;
+  color: hsl(var(--muted-foreground));
+}
+
+.sidebar-item:hover {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+}
+
+.sidebar-item.active {
+  background: hsl(var(--accent));
+  color: hsl(var(--foreground));
+  box-shadow: 0 1px 2px rgba(17, 24, 39, 0.06);
+}
+
+.sidebar-active-bar {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 20px;
+  width: 3px;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  background: hsl(var(--primary));
+  opacity: 1;
+}
+
+.sidebar-active-bar.hover {
+  opacity: 0;
+}
+
+.sidebar-item:hover .sidebar-active-bar.hover {
+  opacity: 0.3;
+}
+
+/* App shell: sidebar + scrollable main (no horizontal clip of page) */
+.app-layout {
+  display: flex;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.layout-main-column {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+}
+
+.main-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 24px;
+}
+
+.page-container {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.table-wrapper {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Dashboard: map fills space below stat cards */
+.dashboard-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.top-cards {
+  flex-shrink: 0;
+}
+
+.map-section {
+  height: 400px;
+  width: 100%;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-content .map-section > .map-container {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.dashboard-content .leaflet-container,
+.map-section .leaflet-container {
+  height: 100%;
+  width: 100%;
+}
+
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+}

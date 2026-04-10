@@ -1,0 +1,52 @@
+"""Normalize stored payment rows for reporting (platform / B&B / driver EUR)."""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from app.models.payment import Payment
+
+
+def marketplace_checkout_split_eur(amount_eur: float, has_bnb_id: bool) -> tuple[float, float, float]:
+    """
+    Card checkout gross split: with B&B referral 70% / 10% / 20%, else 80% / 0% / 20%.
+    Returns ``(driver_eur, bnb_eur, platform_eur)``.
+    """
+    a = max(0.0, float(amount_eur))
+    if has_bnb_id:
+        return round(a * 0.7, 2), round(a * 0.1, 2), round(a * 0.2, 2)
+    return round(a * 0.8, 2), 0.0, round(a * 0.2, 2)
+
+
+def checkout_metadata_has_bnb_id(metadata: dict, booking: Any = None) -> bool:
+    """True if session metadata or booking links a B&B provider (``bnb_id`` > 0)."""
+    md = metadata or {}
+    raw = md.get("bnb_id")
+    if raw is not None and str(raw).strip() != "":
+        try:
+            return int(raw) > 0
+        except (TypeError, ValueError):
+            pass
+    if booking is not None:
+        bid = getattr(booking, "bnb_id", None)
+        if bid is not None:
+            try:
+                return int(bid) > 0
+            except (TypeError, ValueError):
+                pass
+    return False
+
+
+def platform_bnb_driver_amounts(p: "Payment") -> tuple[float, float, float]:
+    """(platform_eur, bnb_eur, driver_eur); legacy rows use ``commission_amount`` as platform-only."""
+    drv = float(getattr(p, "driver_amount", 0) or 0) if getattr(p, "driver_amount", None) is not None else 0.0
+    pa = getattr(p, "platform_amount", None)
+    ba = getattr(p, "bnb_amount", None)
+    if pa is not None:
+        return float(pa), float(ba or 0), drv
+    ca = float(getattr(p, "commission_amount", 0) or 0)
+    bnb_legacy = float(ba or 0) if ba is not None else 0.0
+    if bnb_legacy > 0:
+        return max(0.0, ca - bnb_legacy), bnb_legacy, drv
+    return ca, 0.0, drv

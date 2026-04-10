@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NCC Booking - Checkout</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-slate-50 text-slate-800">
+    <header class="bg-white border-b border-slate-200">
+      <div class="max-w-3xl mx-auto px-4 py-4 flex justify-between items-center">
+        <a href="index.html" class="text-blue-600 text-sm">← Back to tours</a>
+        <span class="text-sm text-slate-500">Secure Checkout</span>
+      </div>
+    </header>
+
+    <main class="max-w-3xl mx-auto px-4 py-8">
+      <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8">
+        <h1 class="text-2xl font-bold">Complete Your Booking</h1>
+        <p class="text-slate-600 mt-2">Fill in your details and confirm your reservation.</p>
+
+        <form id="booking-form" class="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <input id="name" class="border rounded-lg px-3 py-2" placeholder="Full name" required />
+          <input id="email" type="email" class="border rounded-lg px-3 py-2" placeholder="Email" required />
+          <input id="phone" class="border rounded-lg px-3 py-2" placeholder="Phone" required />
+          <input id="people" type="number" min="1" value="1" class="border rounded-lg px-3 py-2" placeholder="People" required />
+          <input id="date" type="date" class="border rounded-lg px-3 py-2" required />
+          <input id="time" type="time" class="border rounded-lg px-3 py-2" required />
+          <input id="flight_number" class="border rounded-lg px-3 py-2 md:col-span-2" placeholder="Flight number (optional)" />
+
+          <label class="md:col-span-2 flex items-center gap-2 text-sm text-slate-600">
+            <input id="pay_now" type="checkbox" class="rounded" />
+            Redirect to Stripe checkout after booking (prepared integration)
+          </label>
+
+          <button id="submit-btn" type="submit" class="md:col-span-2 bg-blue-600 text-white py-3 rounded-lg hover:bg-blue-700">
+            Confirm Booking
+          </button>
+        </form>
+
+        <p id="feedback" class="mt-4 text-sm"></p>
+      </div>
+    </main>
+
+    <script>
+      const API_BASE = "http://127.0.0.1:8000/api";
+      const params = new URLSearchParams(window.location.search);
+      const tourId = params.get("tour_id");
+      const form = document.getElementById("booking-form");
+      const feedbackEl = document.getElementById("feedback");
+      const submitBtn = document.getElementById("submit-btn");
+
+      async function getTourPrice(id) {
+        if (!id) return 0;
+        const res = await fetch(`${API_BASE}/tours`);
+        if (!res.ok) return 0;
+        const tours = await res.json();
+        const tour = tours.find((item) => String(item.id) === String(id));
+        return tour ? Number(tour.price) : 0;
+      }
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        submitBtn.disabled = true;
+        feedbackEl.textContent = "Submitting booking...";
+        feedbackEl.className = "mt-4 text-sm text-slate-500";
+
+        try {
+          const price = await getTourPrice(tourId);
+          const payload = {
+            tour_id: tourId ? Number(tourId) : null,
+            customer_name: document.getElementById("name").value.trim(),
+            email: document.getElementById("email").value.trim(),
+            phone: document.getElementById("phone").value.trim(),
+            people: Number(document.getElementById("people").value),
+            date: document.getElementById("date").value,
+            time: document.getElementById("time").value,
+            flight_number: document.getElementById("flight_number").value.trim() || null,
+            price: price || 0,
+            status: "pending",
+            qr_code: null,
+            driver_id: null,
+            vehicle_id: null
+          };
+
+          const bookingRes = await fetch(`${API_BASE}/bookings`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload)
+          });
+
+          const bookingData = await bookingRes.json();
+          if (!bookingRes.ok) throw new Error(bookingData.detail || "Booking failed");
+
+          if (document.getElementById("pay_now").checked) {
+            const payRes = await fetch(`${API_BASE}/create-checkout-session`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                booking_id: bookingData.id,
+                amount: bookingData.price
+              })
+            });
+            const payData = await payRes.json();
+            if (payRes.ok && payData.checkout_url) {
+              window.location.href = payData.checkout_url;
+              return;
+            }
+          }
+
+          window.location.href = `success.html?booking_id=${bookingData.id}`;
+        } catch (err) {
+          feedbackEl.textContent = err.message;
+          feedbackEl.className = "mt-4 text-sm text-red-600";
+          submitBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

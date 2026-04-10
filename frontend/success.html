@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NCC Booking - Success</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-gradient-to-b from-blue-50 to-white text-slate-800 flex items-center justify-center p-4">
+    <main class="max-w-lg w-full bg-white rounded-2xl shadow-sm border border-slate-200 p-8 text-center">
+      <div class="mx-auto h-14 w-14 rounded-full bg-green-100 text-green-700 flex items-center justify-center text-2xl">✓</div>
+      <h1 class="text-2xl font-bold mt-4">Booking Confirmed!</h1>
+      <p class="text-slate-600 mt-2">Thank you for booking with NCC. Your request is now in our system.</p>
+      <p id="booking-ref" class="mt-4 text-sm text-slate-500"></p>
+
+      <div class="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
+        <a href="index.html" class="px-5 py-3 rounded-lg bg-blue-600 text-white hover:bg-blue-700">Back to Tours</a>
+        <a href="checkout.html" class="px-5 py-3 rounded-lg border border-slate-300 hover:bg-slate-50">New Booking</a>
+      </div>
+    </main>
+
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const bookingId = params.get("booking_id");
+      if (bookingId) {
+        document.getElementById("booking-ref").textContent = `Booking reference: #${bookingId}`;
+      }
+    </script>
+  </body>
+</html>

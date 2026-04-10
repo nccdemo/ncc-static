@@ -1,0 +1,132 @@
+.available-trips {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 20px 48px;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+.available-trips__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.available-trips__title {
+  margin: 0 0 6px;
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.available-trips__subtitle {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #64748b;
+}
+
+.available-trips__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.available-trips__btn {
+  padding: 8px 14px;
+  font-size: 0.875rem;
+  border-radius: 8px;
+  cursor: pointer;
+  border: 1px solid #e2e8f0;
+  background: #fff;
+  color: #0f172a;
+}
+
+.available-trips__btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.available-trips__btn.primary {
+  background: #0f172a;
+  color: #fff;
+  border-color: #0f172a;
+  min-width: 120px;
+}
+
+.available-trips__btn.secondary:hover:not(:disabled) {
+  background: #f8fafc;
+}
+
+.available-trips__error {
+  color: #b91c1c;
+  font-size: 0.9rem;
+  margin: 0 0 16px;
+}
+
+.available-trips__muted {
+  color: #64748b;
+  font-size: 0.95rem;
+}
+
+.available-trips__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.available-trips__card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 18px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.available-trips__card-main {
+  flex: 1;
+  min-width: 220px;
+}
+
+.available-trips__label {
+  display: block;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #94a3b8;
+  margin-bottom: 4px;
+}
+
+.available-trips__route-line {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  color: #0f172a;
+}
+
+.available-trips__arrow {
+  color: #94a3b8;
+  font-weight: 400;
+}
+
+.available-trips__meta {
+  display: flex;
+  gap: 24px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.available-trips__meta p {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #0f172a;
+}

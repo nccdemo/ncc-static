@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>NCC Booking - Tour Details</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="min-h-screen bg-slate-50 text-slate-800">
+    <header class="bg-white border-b border-slate-200">
+      <div class="max-w-5xl mx-auto px-4 py-4 flex justify-between items-center">
+        <a href="index.html" class="text-blue-600 text-sm">← Back to tours</a>
+        <span class="text-sm text-slate-500">NCC Booking</span>
+      </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-4 py-8">
+      <div id="loading" class="text-slate-500">Loading tour...</div>
+      <div id="error" class="hidden text-red-600"></div>
+      <article id="tour-card" class="hidden bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden"></article>
+    </main>
+
+    <script>
+      const API_BASE = "http://127.0.0.1:8000/api";
+      const params = new URLSearchParams(window.location.search);
+      const tourId = params.get("id");
+
+      const loadingEl = document.getElementById("loading");
+      const errorEl = document.getElementById("error");
+      const cardEl = document.getElementById("tour-card");
+
+      async function loadTour() {
+        if (!tourId) {
+          errorEl.textContent = "Missing tour id.";
+          errorEl.classList.remove("hidden");
+          loadingEl.classList.add("hidden");
+          return;
+        }
+
+        try {
+          const res = await fetch(`${API_BASE}/tours`);
+          if (!res.ok) throw new Error("Unable to fetch tour details");
+          const tours = await res.json();
+          const tour = tours.find((item) => String(item.id) === String(tourId));
+          if (!tour) throw new Error("Tour not found");
+
+          const image = tour.image_url || "https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?auto=format&fit=crop&w=1200&q=80";
+          cardEl.innerHTML = `
+            <img src="${image}" alt="${tour.title}" class="h-72 w-full object-cover" />
+            <div class="p-6 md:p-8">
+              <p class="inline-block text-xs uppercase tracking-wide text-blue-700 bg-blue-50 px-3 py-1 rounded-full">${tour.type || "tour"}</p>
+              <h1 class="text-3xl font-bold mt-3">${tour.title}</h1>
+              <p class="text-slate-600 mt-4">${tour.description || "Enjoy a premium NCC experience with expert drivers and seamless service."}</p>
+              <div class="mt-6 flex flex-col sm:flex-row sm:items-center gap-4 sm:justify-between">
+                <p class="text-2xl font-semibold text-blue-700">€ ${Number(tour.price).toFixed(2)}</p>
+                <a href="checkout.html?tour_id=${tour.id}" class="px-5 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-center">Book Now</a>
+              </div>
+            </div>
+          `;
+          cardEl.classList.remove("hidden");
+        } catch (err) {
+          errorEl.textContent = err.message;
+          errorEl.classList.remove("hidden");
+        } finally {
+          loadingEl.classList.add("hidden");
+        }
+      }
+
+      loadTour();
+    </script>
+  </body>
+</html>

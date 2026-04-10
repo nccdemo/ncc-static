@@ -1,0 +1,1 @@
+"""NCC Backend application package."""
