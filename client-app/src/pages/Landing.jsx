@@ -2,14 +2,11 @@ import { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import {
   getStoredReferralCode,
+  persistReferralFromHost,
   persistReferralFromUrlSearch,
-  getSubdomainReferral,
-  REFERRAL_STORAGE_KEY,
 } from '../utils/referralStorage'
 
-const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
-/** For `<img src>` (no Vite proxy); matches user-facing API host. */
-const ASSET_API_ORIGIN = (import.meta.env.VITE_API_BASE || 'http://localhost:8000').replace(/\/$/, '')
+import { apiUrl } from '../api/apiUrl.js'
 
 export default function Landing() {
   const { search } = useLocation()
@@ -18,10 +15,7 @@ export default function Landing() {
 
   useEffect(() => {
     persistReferralFromUrlSearch(search)
-    const sub = getSubdomainReferral()
-    if (sub) {
-      localStorage.setItem(REFERRAL_STORAGE_KEY, sub)
-    }
+    persistReferralFromHost()
     setActiveRef(getStoredReferralCode())
   }, [search])
 
@@ -38,7 +32,7 @@ export default function Landing() {
     const now = Date.now()
     if (last && now - Number(last) < 4000) return
     sessionStorage.setItem(dedupeKey, String(now))
-    void fetch(`${API_BASE}/api/referral/visit`, {
+    void fetch(apiUrl('/api/referral/visit'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ referral_code: activeRef }),
@@ -55,8 +49,10 @@ export default function Landing() {
         return
       }
       try {
-        const url = `${API_BASE}/api/bnb/by-referral/${encodeURIComponent(activeRef)}`
-        const res = await fetch(url, { headers: { Accept: 'application/json' } })
+        const res = await fetch(
+          apiUrl(`/api/bnb/by-referral/${encodeURIComponent(activeRef)}`),
+          { headers: { Accept: 'application/json' } },
+        )
         const data = await res.json().catch(() => ({}))
         if (cancelled) return
         if (!res.ok) {
@@ -70,6 +66,7 @@ export default function Landing() {
         setBrand({
           name: String(data.name || '').trim(),
           logo_url: String(data.logo_url || '').trim() || null,
+          cover_image_url: String(data.cover_image_url || '').trim() || null,
         })
       } catch {
         if (!cancelled) setBrand(null)
@@ -87,11 +84,10 @@ export default function Landing() {
     (activeRef ? String(activeRef).trim() : '') ||
     'La tua struttura partner'
   const logoUrlRaw = brand?.logo_url ? String(brand.logo_url).trim() : ''
-  const logoUrl =
-    logoUrlRaw &&
-    (logoUrlRaw.startsWith('http://') || logoUrlRaw.startsWith('https://')
-      ? logoUrlRaw
-      : `${ASSET_API_ORIGIN}${logoUrlRaw.startsWith('/') ? '' : '/'}${logoUrlRaw}`)
+  const logoUrl = logoUrlRaw ? apiUrl(logoUrlRaw) : ''
+  const coverImagePathRaw = brand?.cover_image_url ? String(brand.cover_image_url).trim() : ''
+  const coverImageUrl = coverImagePathRaw ? apiUrl(coverImagePathRaw) : ''
+  const hasCoverImage = Boolean(coverImageUrl)
   const bookingViaName = name
 
   const heroBody = (
@@ -137,10 +133,22 @@ export default function Landing() {
     return (
       <div className="landing-bnb">
         <div className="landing-bnb-branding-banner">
-          {logoUrl ? <img src={logoUrl} alt={name} style={{ height: 50 }} /> : null}
+          {logoUrl ? (
+            <img src={logoUrl} alt={name} style={{ width: '120px', height: 'auto', objectFit: 'contain' }} />
+          ) : null}
           <h3 className="landing-bnb-branding-title">Esperienze consigliate da {name}</h3>
         </div>
-        <div className={`landing-hero landing-hero--default`}>
+        <div
+          className={`landing-hero ${hasCoverImage ? 'landing-hero--cover' : 'landing-hero--default'}`}
+          style={
+            hasCoverImage && coverImageUrl
+              ? {
+                  backgroundImage: `url("${coverImageUrl.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`,
+                }
+              : undefined
+          }
+        >
+          {hasCoverImage ? <div className="landing-hero-overlay" aria-hidden /> : null}
           <div className="landing-hero-inner">{heroBody}</div>
         </div>
         <div className="landing landing-bnb-rest">{landingRest}</div>

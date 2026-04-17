@@ -1,10 +1,9 @@
 import axios from 'axios'
 
-const origin =
-  import.meta.env.VITE_API_ORIGIN?.replace(/\/$/, '') || 'http://localhost:8000'
+import { apiBasePath } from './apiUrl.js'
 
 const api = axios.create({
-  baseURL: `${origin}/api`,
+  baseURL: apiBasePath(),
   headers: { 'Content-Type': 'application/json' },
   timeout: 30000,
 })

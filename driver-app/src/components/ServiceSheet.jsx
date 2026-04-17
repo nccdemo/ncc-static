@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { requestDriverLocationRestart } from './DriverLocationReporter.jsx'
 import api from '../api/axios.js'
+import { apiUrl } from '../api/apiUrl.js'
 import { formatApiDetail } from '../api/client.js'
 import { CardElement, Elements, useElements, useStripe } from '@stripe/react-stripe-js'
 import { loadStripe } from '@stripe/stripe-js'
@@ -30,14 +32,6 @@ const stripePromise = import.meta.env.VITE_STRIPE_PUBLIC_KEY
   ? loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY)
   : null
 
-function normalizeDriverTripStatus(raw) {
-  const s = String(raw || '')
-    .toLowerCase()
-    .replace(/-/g, '_')
-  if (s === 'in_progress') return 'on_trip'
-  return s
-}
-
 function TripPaymentPanel({ tripId, disabled, onCash, onPaid }) {
   const stripe = useStripe()
   const elements = useElements()
@@ -52,14 +46,9 @@ function TripPaymentPanel({ tripId, disabled, onCash, onPaid }) {
 
       setPaying(true)
       setCardErr('')
-      const res = await fetch(`/api/rides/${tripId}/create-payment-intent`, {
-        method: 'POST',
-      })
-      const data = await res.json()
-      if (!res.ok) {
-        throw new Error(
-          typeof data?.detail === 'string' ? data.detail : 'Could not create payment intent',
-        )
+      const { data } = await api.post(`/rides/${tripId}/create-payment-intent`)
+      if (!data?.client_secret) {
+        throw new Error('Could not create payment intent')
       }
 
       const result = await stripe.confirmCardPayment(data.client_secret, {
@@ -74,22 +63,19 @@ function TripPaymentPanel({ tripId, disabled, onCash, onPaid }) {
 
       if (result.paymentIntent?.status === 'succeeded') {
         const pid = result.paymentIntent.id
-        const cr = await fetch(`/api/rides/${tripId}/confirm-stripe-payment`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ payment_intent_id: pid }),
-        })
-        const cd = await cr.json().catch(() => ({}))
-        if (!cr.ok) {
+        try {
+          await api.post(`/rides/${tripId}/confirm-stripe-payment`, {
+            payment_intent_id: pid,
+          })
+          alert('Payment successful')
+        } catch (confirmErr) {
           const msg =
-            typeof cd?.detail === 'string' ? cd.detail : 'Registrazione pagamento fallita'
+            formatApiDetail(confirmErr?.response?.data?.detail) || 'Registrazione pagamento fallita'
           console.error('confirm-stripe-payment:', msg)
           setCardErr(msg)
           alert(
             `Pagamento Stripe riuscito ma aggiornamento sistema non riuscito: ${msg}. Controlla la dashboard o riprova.`,
           )
-        } else {
-          alert('Payment successful')
         }
         await onPaid?.()
         return
@@ -98,8 +84,10 @@ function TripPaymentPanel({ tripId, disabled, onCash, onPaid }) {
       throw new Error(`Unexpected status: ${result.paymentIntent?.status || 'unknown'}`)
     } catch (err) {
       console.error(err)
-      setCardErr(err?.message || 'Payment failed')
-      alert('Payment failed')
+      const apiMsg = formatApiDetail(err?.response?.data?.detail)
+      const msg = apiMsg || err?.message || 'Payment failed'
+      setCardErr(msg)
+      alert(msg)
     } finally {
       setPaying(false)
     }
@@ -149,14 +137,17 @@ export default function ServiceSheet({ tripId, driverId, onBack, onOpenScan }) {
     status: 'none',
   })
 
-  const completed = Boolean(tripMeta?.service_end_time)
-  const started = Boolean(tripMeta?.service_start_time)
-  const canReset = Boolean(tripMeta?.service_start_time || tripMeta?.service_end_time)
   const statusUpper = String(tripMeta?.status || '').toUpperCase()
-  const showPickupNav = statusUpper !== 'IN_PROGRESS'
-  const showDestinationNav = statusUpper === 'IN_PROGRESS'
-  const tripNorm = normalizeDriverTripStatus(tripMeta?.status)
-  const canTakePayment = tripNorm === 'arrived' || tripNorm === 'on_trip'
+  const isInProgress = statusUpper === 'IN_PROGRESS'
+  const isCompleted = statusUpper === 'COMPLETED'
+  const isTerminal = isCompleted || statusUpper === 'CANCELLED' || statusUpper === 'EXPIRED'
+  /** Pickup navigation until the trip is officially in service (API ``IN_PROGRESS``). */
+  const showPickupNav = !isInProgress && !isTerminal
+  /** Destination navigation only while service is running. */
+  const showDestinationNav = isInProgress
+  /** Card/cash payment only during ``IN_PROGRESS`` (single linear flow). */
+  const showPayment = isInProgress
+  const canReset = Boolean(tripMeta?.service_start_time || tripMeta?.service_end_time)
 
   const refreshRidePayment = useCallback(async () => {
     try {
@@ -174,25 +165,13 @@ export default function ServiceSheet({ tripId, driverId, onBack, onOpenScan }) {
 
   const handleCashPayment = useCallback(async () => {
     try {
-      const res = await fetch(`/api/rides/${tripId}/cash`, {
-        method: 'POST',
-      })
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        const detail = data?.detail
-        const msg =
-          typeof detail === 'string'
-            ? detail
-            : Array.isArray(detail) && detail[0]?.msg
-              ? String(detail[0].msg)
-              : res.statusText
-        throw new Error(msg || 'Request failed')
-      }
+      await api.post(`/rides/${tripId}/cash`)
       alert('Cash payment recorded')
       await refreshRidePayment()
     } catch (err) {
       console.error(err)
-      alert('Error recording cash payment')
+      const msg = formatApiDetail(err?.response?.data?.detail) || 'Error recording cash payment'
+      alert(msg)
     }
   }, [tripId, refreshRidePayment])
 
@@ -225,6 +204,56 @@ export default function ServiceSheet({ tripId, driverId, onBack, onOpenScan }) {
     },
     [driverId, endKmDirty, refreshRidePayment, startKmDirty, tripId],
   )
+
+  const postTripStatus = useCallback(
+    async (status) => {
+      await api.post(`/driver/trips/${tripId}/status`, { status })
+    },
+    [tripId],
+  )
+
+  const beginService = useCallback(async () => {
+    setSaving(true)
+    setServiceError('')
+    const now = new Date().toISOString()
+    const km = toNumberOrNull(startKm)
+    try {
+      await api.post(`/driver/trips/${tripId}/update-service`, {
+        driver_id: driverId,
+        service_start_time: now,
+        start_km: km,
+      })
+      await postTripStatus('in_progress')
+      requestDriverLocationRestart()
+      setStartKmDirty(false)
+      await fetchTrip(true)
+    } catch (e) {
+      setServiceError(formatApiDetail(e.response?.data?.detail) || 'Impossibile avviare il servizio')
+    } finally {
+      setSaving(false)
+    }
+  }, [driverId, fetchTrip, postTripStatus, startKm, tripId])
+
+  const finishService = useCallback(async () => {
+    setSaving(true)
+    setServiceError('')
+    const now = new Date().toISOString()
+    const km = toNumberOrNull(endKm)
+    try {
+      await api.post(`/driver/trips/${tripId}/update-service`, {
+        driver_id: driverId,
+        service_end_time: now,
+        end_km: km,
+      })
+      await postTripStatus('completed')
+      setEndKmDirty(false)
+      await fetchTrip(true)
+    } catch (e) {
+      setServiceError(formatApiDetail(e.response?.data?.detail) || 'Impossibile terminare il servizio')
+    } finally {
+      setSaving(false)
+    }
+  }, [driverId, endKm, fetchTrip, postTripStatus, tripId])
 
   useEffect(() => {
     const effectiveDriverId = tripMeta?.driver_id ?? driverId
@@ -382,8 +411,9 @@ export default function ServiceSheet({ tripId, driverId, onBack, onOpenScan }) {
     } finally {
       setSaving(false)
       setShowResetModal(false)
+      void fetchTrip(true)
     }
-  }, [tripId])
+  }, [fetchTrip, tripId])
 
   return (
     <div className="screen">
@@ -469,7 +499,7 @@ export default function ServiceSheet({ tripId, driverId, onBack, onOpenScan }) {
 
       <a
         className="btn btn-outline"
-        href={`/api/service-sheet/${tripId}/pdf`}
+        href={apiUrl(`/api/service-sheet/${tripId}/pdf`)}
         target="_blank"
         rel="noopener noreferrer"
       >
@@ -482,7 +512,105 @@ export default function ServiceSheet({ tripId, driverId, onBack, onOpenScan }) {
 
       {!loading && !error && data && (
         <>
-          {canTakePayment ? (
+          <section className="panel">
+            <h2>Servizio</h2>
+            <p className="muted-sm" style={{ marginTop: 0, marginBottom: '0.75rem' }}>
+              Stato corsa: <strong>{tripMeta?.status || '—'}</strong>
+            </p>
+            <div className="service-grid">
+              <div className="service-box">
+                <div className="service-label">Inizio servizio</div>
+                <div className="service-value">{hhmm(tripMeta?.service_start_time)}</div>
+              </div>
+              <div className="service-box">
+                <div className="service-label">Fine servizio</div>
+                <div className="service-value">{hhmm(tripMeta?.service_end_time)}</div>
+              </div>
+            </div>
+
+            <div className="service-actions">
+              <button
+                type="button"
+                className="btn btn-primary btn-block btn-big"
+                disabled={saving || isInProgress || isTerminal}
+                onClick={beginService}
+              >
+                {saving && !isInProgress && !isCompleted ? 'Attendere…' : 'Inizia servizio'}
+              </button>
+
+              <div className="field">
+                <label className="field-label" htmlFor="km-start">
+                  KM iniziali
+                </label>
+                <input
+                  id="km-start"
+                  className="input"
+                  inputMode="decimal"
+                  type="number"
+                  step="0.1"
+                  value={startKm}
+                  placeholder="—"
+                  disabled={isInProgress || isTerminal}
+                  onChange={(e) => {
+                    setStartKmDirty(true)
+                    setStartKm(e.target.value)
+                  }}
+                  onBlur={() => {
+                    if (isInProgress || isCompleted) return
+                    const v = toNumberOrNull(startKm)
+                    updateService({ start_km: v })
+                  }}
+                />
+              </div>
+
+              <button
+                type="button"
+                className="btn btn-primary btn-block btn-big"
+                disabled={saving || !isInProgress || isCompleted}
+                onClick={finishService}
+              >
+                {saving && isInProgress ? 'Attendere…' : 'Termina servizio'}
+              </button>
+
+              <div className="field">
+                <label className="field-label" htmlFor="km-end">
+                  KM finali
+                </label>
+                <input
+                  id="km-end"
+                  className="input"
+                  inputMode="decimal"
+                  type="number"
+                  step="0.1"
+                  value={endKm}
+                  placeholder="—"
+                  disabled={!isInProgress || isCompleted}
+                  onChange={(e) => {
+                    setEndKmDirty(true)
+                    setEndKm(e.target.value)
+                  }}
+                  onBlur={() => {
+                    if (!isInProgress || isCompleted) return
+                    const v = toNumberOrNull(endKm)
+                    updateService({ end_km: v })
+                  }}
+                />
+              </div>
+
+              {canReset ? (
+                <button
+                  type="button"
+                  className="btn btn-danger btn-block"
+                  disabled={saving}
+                  onClick={() => setShowResetModal(true)}
+                >
+                  Reset servizio
+                </button>
+              ) : null}
+            </div>
+          </section>
+
+          {showPayment ? (
             <section className="panel" style={{ marginTop: '0.75rem' }}>
               <h2>Payment</h2>
               {ridePayment.settled ? (
@@ -517,111 +645,6 @@ export default function ServiceSheet({ tripId, driverId, onBack, onOpenScan }) {
               )}
             </section>
           ) : null}
-
-          <section className="panel">
-            <h2>Servizio</h2>
-            <div className="service-grid">
-              <div className="service-box">
-                <div className="service-label">Inizio servizio</div>
-                <div className="service-value">{hhmm(tripMeta?.service_start_time)}</div>
-              </div>
-              <div className="service-box">
-                <div className="service-label">Fine servizio</div>
-                <div className="service-value">{hhmm(tripMeta?.service_end_time)}</div>
-              </div>
-            </div>
-
-            <div className="service-actions">
-              <button
-                type="button"
-                className="btn btn-primary btn-block btn-big"
-                disabled={saving || completed || started}
-                onClick={() => {
-                  const now = new Date().toISOString()
-                  updateService({
-                    service_start_time: now,
-                    start_km: toNumberOrNull(startKm),
-                  })
-                }}
-              >
-                {saving && !started ? 'Attendere…' : 'Inizia servizio'}
-              </button>
-
-              <div className="field">
-                <label className="field-label" htmlFor="km-start">
-                  KM iniziali
-                </label>
-                <input
-                  id="km-start"
-                  className="input"
-                  inputMode="decimal"
-                  type="number"
-                  step="0.1"
-                  value={startKm}
-                  placeholder="—"
-                  onChange={(e) => {
-                    setStartKmDirty(true)
-                    setStartKm(e.target.value)
-                  }}
-                  onBlur={() => {
-                    if (completed) return
-                    const v = toNumberOrNull(startKm)
-                    updateService({ start_km: v })
-                  }}
-                />
-              </div>
-
-              <button
-                type="button"
-                className="btn btn-primary btn-block btn-big"
-                disabled={saving || completed || !started}
-                onClick={() => {
-                  const now = new Date().toISOString()
-                  updateService({
-                    service_end_time: now,
-                    end_km: toNumberOrNull(endKm),
-                  })
-                }}
-              >
-                {saving && started ? 'Attendere…' : 'Termina servizio'}
-              </button>
-
-              <div className="field">
-                <label className="field-label" htmlFor="km-end">
-                  KM finali
-                </label>
-                <input
-                  id="km-end"
-                  className="input"
-                  inputMode="decimal"
-                  type="number"
-                  step="0.1"
-                  value={endKm}
-                  placeholder="—"
-                  onChange={(e) => {
-                    setEndKmDirty(true)
-                    setEndKm(e.target.value)
-                  }}
-                  onBlur={() => {
-                    if (completed) return
-                    const v = toNumberOrNull(endKm)
-                    updateService({ end_km: v })
-                  }}
-                />
-              </div>
-
-              {canReset ? (
-                <button
-                  type="button"
-                  className="btn btn-danger btn-block"
-                  disabled={saving}
-                  onClick={() => setShowResetModal(true)}
-                >
-                  Reset servizio
-                </button>
-              ) : null}
-            </div>
-          </section>
 
           <section className="panel">
             <h2>Autista</h2>

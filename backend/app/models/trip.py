@@ -10,6 +10,13 @@ from app.database import Base
 
 
 class TripStatus(str, Enum):
+    """
+    Workflow states (Postgres enum ``trip_status``).
+
+    Marketplace "available" pool: :attr:`SCHEDULED`, :attr:`PENDING` (no driver, claimable).
+    Terminal / cleanup: :attr:`COMPLETED`, :attr:`CANCELLED`, :attr:`EXPIRED`.
+    """
+
     SCHEDULED = "SCHEDULED"
     PENDING = "PENDING"
     ASSIGNED = "ASSIGNED"
@@ -20,6 +27,7 @@ class TripStatus(str, Enum):
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"
+    EXPIRED = "EXPIRED"
 
 
 class Trip(Base):
@@ -31,6 +39,7 @@ class Trip(Base):
         Integer, ForeignKey("tour_instances.id"), nullable=True, index=True
     )
     driver_id = Column(Integer, ForeignKey("drivers.id"), nullable=True, index=True)
+    assigned_driver_id = Column(Integer, ForeignKey("drivers.id"), nullable=True, index=True)
     vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=True, index=True)
     service_date = Column(Date, nullable=True, index=True)
     pickup = Column(String, nullable=True)
@@ -47,13 +56,16 @@ class Trip(Base):
     status = Column(
         SAEnum(TripStatus, name="trip_status"),
         nullable=False,
-        default=TripStatus.SCHEDULED
+        default=TripStatus.SCHEDULED,
+        index=True,
     )
     assigned_at = Column(DateTime, nullable=True)
     assignment_attempts = Column(Integer, nullable=False, default=0)
     last_assigned_at = Column(DateTime, nullable=True)
     started_at = Column(DateTime, nullable=True)
-    completed_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True, index=True)
+    # When the ride is expected to start (UTC naive, same convention as ``eta`` / ``datetime.utcnow``).
+    scheduled_at = Column(DateTime, nullable=True, index=True)
     start_km = Column(Float, nullable=True)
     end_km = Column(Float, nullable=True)
     service_start_time = Column(DateTime, nullable=True)
@@ -76,7 +88,17 @@ class Trip(Base):
     driver_payout_id = Column(Integer, ForeignKey("driver_payouts.id", ondelete="SET NULL"), nullable=True, index=True)
 
     tour_instance = relationship("TourInstance", back_populates="trips")
-    driver = relationship("Driver", back_populates="trips")
+    driver = relationship(
+        "Driver",
+        back_populates="trips",
+        foreign_keys=[driver_id],
+        overlaps="assigned_driver",
+    )
+    assigned_driver = relationship(
+        "Driver",
+        foreign_keys=[assigned_driver_id],
+        overlaps="driver,trips",
+    )
     vehicle = relationship("Vehicle", back_populates="trips")
     bookings = relationship(
         "Booking",

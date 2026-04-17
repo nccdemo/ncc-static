@@ -61,10 +61,16 @@ def create_connect_express_account(
     aid = str(getattr(account, "id", "") or "").strip()
     if not aid:
         raise RuntimeError("Risposta Stripe senza account id")
+    logger.info("Stripe Express Connect account created: account_id=%s", aid)
     return aid
 
 
-def create_connect_account_onboarding_link(account_id: str) -> str:
+def create_connect_account_onboarding_link(
+    account_id: str,
+    *,
+    refresh_url: str | None = None,
+    return_url: str | None = None,
+) -> str:
     """Create a short-lived Account Link URL for Express onboarding."""
     if not stripe.api_key:
         raise RuntimeError("Stripe non configurato")
@@ -73,11 +79,14 @@ def create_connect_account_onboarding_link(account_id: str) -> str:
     if not aid:
         raise ValueError("account_id mancante")
 
+    ref = (refresh_url or "").strip() or connect_onboarding_refresh_url()
+    ret = (return_url or "").strip() or connect_onboarding_return_url()
+
     try:
         link = stripe.AccountLink.create(
             account=aid,
-            refresh_url=connect_onboarding_refresh_url(),
-            return_url=connect_onboarding_return_url(),
+            refresh_url=ref,
+            return_url=ret,
             type="account_onboarding",
         )
     except StripeError as e:

@@ -214,6 +214,7 @@ def list_driver_trips_for_app(
                 "id": t.id,
                 "driver_id": int(t.driver_id),
                 "status": label,
+                "trip_status": str(st.value if hasattr(st, "value") else st).lower(),
                 "service_date": t.service_date.isoformat() if getattr(t, "service_date", None) else None,
                 "vehicle": _driver_app_trip_vehicle(t, driver),
                 "bookings": [
@@ -408,6 +409,7 @@ def post_driver_location(
             print("DRIVER ID:", did)
             print("LAT/LNG:", float(lat), float(lng))
             print("ALL LOCATIONS:", driver_locations)
+            manager.broadcast_driver_location_sync(did, float(lat), float(lng))
     except Exception:
         pass
 
@@ -432,13 +434,10 @@ def update_driver_location(
     db.commit()
     db.refresh(driver)
 
-    manager.broadcast_sync(
-        {
-            "event": "driver_location_update",
-            "driver_id": driver.id,
-            "lat": driver.latitude,
-            "lng": driver.longitude,
-        }
+    manager.broadcast_driver_location_sync(
+        int(driver.id),
+        float(driver.latitude),
+        float(driver.longitude),
     )
 
     return {

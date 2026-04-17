@@ -1,3 +1,5 @@
+import os
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -95,22 +97,17 @@ class DriverRegisterResponse(BaseModel):
     token_type: str | None = None
 
 
-class AuthLoginResponse(BaseModel):
+class UnifiedLoginResponse(BaseModel):
+    """JWT plus decoded-style fields for all login paths (admin, B&amp;B, driver, legacy driver)."""
+
     access_token: str
+    token: str = Field(..., description="Same value as access_token (alias for clients expecting token).")
     token_type: str = "bearer"
+    user_id: int | None = None
     role: str
+    driver_id: int | None = None
+    bnb_id: int | None = None
     referral_code: str | None = None
-
-
-class TokenRoleResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    role: str
-
-
-class AccessTokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
 
 
 class CurrentUserOut(BaseModel):
@@ -120,11 +117,44 @@ class CurrentUserOut(BaseModel):
     email: str
     role: str
     is_active: bool
+    company_id: int | None = None
+    company_name: str | None = None
 
 
-def _jwt_extra_for_user(user: User) -> dict:
+def _portal_admin_emails() -> set[str]:
+    """Emails that always resolve to portal role ``admin`` (comma-separated env ``PORTAL_ADMIN_EMAILS``)."""
+    raw = os.getenv("PORTAL_ADMIN_EMAILS", "massimosavi1805@gmail.com")
+    return {e.strip().lower() for e in raw.split(",") if e.strip()}
+
+
+def resolve_unified_login_role(db: Session, user: User) -> str:
+    """
+    Return one of ``admin`` | ``driver`` | ``bnb`` using ``users.role`` when set correctly,
+    else infer from ``providers`` / ``drivers`` rows, then ``PORTAL_ADMIN_EMAILS``.
+    """
+    raw = (getattr(user, "role", None) or "").strip().lower()
+    if raw in ("administrator", "superadmin", "superuser", "root"):
+        return "admin"
+    if raw in ("admin", "driver", "bnb"):
+        return raw
+
     uid = int(user.id)
-    return {"user_id": uid}
+    if (
+        db.query(Provider)
+        .filter(Provider.user_id == uid, func.lower(Provider.type) == "bnb")
+        .first()
+    ):
+        return "bnb"
+    if db.query(Driver).filter(Driver.user_id == uid).first() is not None:
+        return "driver"
+
+    email_l = (user.email or "").strip().lower()
+    if email_l in _portal_admin_emails():
+        return "admin"
+
+    if raw:
+        return raw
+    return "user"
 
 
 def _referral_code_for_bnb_user(db: Session, user_id: int) -> str | None:
@@ -138,18 +168,109 @@ def _referral_code_for_bnb_user(db: Session, user_id: int) -> str | None:
     return normalize_referral_code(getattr(prov, "referral_code", None))
 
 
-def auth_login_response_for_user(db: Session, user: User) -> AuthLoginResponse:
-    role = (getattr(user, "role", None) or "user").strip().lower()
+def unified_login_response_for_user(db: Session, user: User) -> UnifiedLoginResponse:
+    """Build JWT + body for a ``users`` row (password already verified)."""
+    role = resolve_unified_login_role(db, user)
+    if role not in ("admin", "driver", "bnb"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Unsupported account type for portal login",
+        )
     uid = int(user.id)
-    token = create_access_token(
-        subject=str(uid),
-        role=role,
-        extra_claims=_jwt_extra_for_user(user),
-    )
+    extra: dict = {"user_id": uid}
+    driver_id: int | None = None
+    bnb_id: int | None = None
     ref: str | None = None
-    if role == "bnb":
+
+    if role == "admin":
+        token = create_access_token(subject=str(uid), role="admin", extra_claims=extra)
+    elif role == "bnb":
+        prov = (
+            db.query(Provider)
+            .filter(Provider.user_id == uid, func.lower(Provider.type) == "bnb")
+            .first()
+        )
+        if prov is not None:
+            bnb_id = int(prov.id)
+            extra["bnb_id"] = bnb_id
+        token = create_access_token(subject=str(uid), role="bnb", extra_claims=extra)
         ref = _referral_code_for_bnb_user(db, uid)
-    return AuthLoginResponse(access_token=token, role=role, referral_code=ref)
+    elif role == "driver":
+        d = db.query(Driver).filter(Driver.user_id == uid).first()
+        if d is not None:
+            driver_id = int(d.id)
+            extra["driver_id"] = driver_id
+        token = create_access_token(subject=str(uid), role="driver", extra_claims=extra)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Invalid resolved role",
+        )
+
+    return UnifiedLoginResponse(
+        access_token=token,
+        token=token,
+        role=role,
+        user_id=uid,
+        driver_id=driver_id,
+        bnb_id=bnb_id,
+        referral_code=ref,
+    )
+
+
+def perform_unified_login(db: Session, email: str, password: str) -> UnifiedLoginResponse:
+    """
+    Single email/password flow: ``users`` first (admin / bnb / driver on ``users``), else ``drivers``
+    (legacy row without ``user_id``).
+    """
+    email_norm = (email or "").strip().lower()
+    user = get_user_by_email(db, email_norm)
+    if user is not None:
+        if not verify_user_password(password, user.password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials",
+            )
+        if not bool(getattr(user, "is_active", True)):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Inactive user",
+            )
+        return unified_login_response_for_user(db, user)
+
+    d = get_driver_by_email(db, email_norm)
+    if d is None or not verify_password(password, d.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
+        )
+    if not d.is_active:
+        if d.signup_status == "pending":
+            detail = "Your account is pending approval"
+        elif d.signup_status == "rejected":
+            detail = "Your registration was not approved"
+        else:
+            detail = "Account is disabled"
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=detail,
+        )
+    if d.signup_status not in ("active", "legacy"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account cannot sign in",
+        )
+    did = int(d.id)
+    token = create_driver_access_token(did, (d.email or "").strip())
+    return UnifiedLoginResponse(
+        access_token=token,
+        token=token,
+        role="driver",
+        user_id=None,
+        driver_id=did,
+        bnb_id=None,
+        referral_code=None,
+    )
 
 
 def require_users_table_user(db: Session, email: str, password: str) -> User:
@@ -168,32 +289,25 @@ def require_users_table_user(db: Session, email: str, password: str) -> User:
     return user
 
 
-def issue_users_table_access_token(db: Session, email: str, password: str) -> AuthLoginResponse:
-    """JWT for a ``users`` row after email/password check (``POST /api/auth/login``)."""
-    user = require_users_table_user(db, email, password)
-    return auth_login_response_for_user(db, user)
-
-
-@router.post("/login", response_model=AuthLoginResponse)
+@router.post("/login", response_model=UnifiedLoginResponse, deprecated=True)
 def login(
     payload: AdminLoginRequest,
     db: Session = Depends(get_db),
-) -> AuthLoginResponse:
+) -> UnifiedLoginResponse:
     """
-    Authenticate against the ``users`` table; return JWT (7d) with ``user_id`` and ``role``.
-    For B&B accounts, includes ``referral_code``.
+    Deprecated: prefer ``POST /api/login``. Same behaviour (``users`` then legacy ``drivers``).
     """
-    return issue_users_table_access_token(db, payload.email, payload.password)
+    return perform_unified_login(db, payload.email, payload.password)
 
 
-@router.post("/register-driver", response_model=AuthLoginResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register-driver", response_model=UnifiedLoginResponse, status_code=status.HTTP_201_CREATED)
 def register_driver_with_user(
     payload: DriverRegisterPayload,
     db: Session = Depends(get_db),
-) -> AuthLoginResponse:
+) -> UnifiedLoginResponse:
     """
     Create ``users`` (role ``driver``) + ``drivers`` profile linked via ``user_id``.
-    Password is bcrypt-hashed on the user; returns JWT like ``/auth/login``.
+    Password is bcrypt-hashed on the user; returns JWT like ``/api/login``.
     """
     email = payload.email
     if get_user_by_email(db, email):
@@ -272,14 +386,14 @@ def register_driver_with_user(
     db.commit()
     db.refresh(user)
 
-    return auth_login_response_for_user(db, user)
+    return unified_login_response_for_user(db, user)
 
 
-@router.post("/register-bnb", response_model=AuthLoginResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/register-bnb", response_model=UnifiedLoginResponse, status_code=status.HTTP_201_CREATED)
 def register_bnb_with_user(
     payload: BnbRegisterAuthPayload,
     db: Session = Depends(get_db),
-) -> AuthLoginResponse:
+) -> UnifiedLoginResponse:
     """Create ``users`` (role ``bnb``) + ``providers`` (type ``bnb``) with a unique referral code."""
     email = payload.email
     if get_user_by_email(db, email):
@@ -331,12 +445,39 @@ def register_bnb_with_user(
             detail="Email already registered",
         ) from None
     db.refresh(user)
-    return auth_login_response_for_user(db, user)
+    return unified_login_response_for_user(db, user)
 
 
 @router.get("/me", response_model=CurrentUserOut)
-def auth_me(current: User = Depends(get_current_active_user)) -> User:
-    return current
+def auth_me(
+    current: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    company_id: int | None = None
+    company_name: str | None = None
+    role = (getattr(current, "role", None) or "").strip().lower()
+    if role == "driver":
+        d = db.query(Driver).filter(Driver.user_id == int(current.id)).first()
+        if d is not None and getattr(d, "company_id", None) is not None:
+            try:
+                company_id = int(getattr(d, "company_id"))
+            except (TypeError, ValueError):
+                company_id = None
+        if company_id is not None:
+            from app.models.company import Company
+
+            c = db.query(Company).filter(Company.id == int(company_id)).first()
+            if c is not None:
+                company_name = (getattr(c, "name", None) or "").strip() or None
+
+    return {
+        "id": int(current.id),
+        "email": current.email,
+        "role": role or str(getattr(current, "role", "") or ""),
+        "is_active": bool(getattr(current, "is_active", True)),
+        "company_id": company_id,
+        "company_name": company_name,
+    }
 
 
 @router.get("/admin/ping")
@@ -351,65 +492,34 @@ def auth_driver_or_bnb_ping(_user: User = Depends(get_current_role(["driver", "b
     return {"ok": True}
 
 
-@router.post("/bnb/login", response_model=TokenRoleResponse)
+@router.post("/bnb/login", response_model=UnifiedLoginResponse, deprecated=True)
 def bnb_login(
     payload: AdminLoginRequest,
     db: Session = Depends(get_db),
-) -> TokenRoleResponse:
-    """B&B partner login (``users`` row with ``role`` = ``bnb``)."""
-    user = get_user_by_email(db, payload.email)
-    if user is None or not verify_user_password(payload.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-        )
-    role = (getattr(user, "role", None) or "").strip().lower()
-    if role != "bnb":
+) -> UnifiedLoginResponse:
+    """Deprecated: prefer ``POST /api/login``."""
+    out = perform_unified_login(db, payload.email, payload.password)
+    if out.role != "bnb":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not a B&B account",
         )
-    if not bool(getattr(user, "is_active", True)):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive user",
-        )
-    token = create_access_token(
-        subject=str(int(user.id)),
-        role="bnb",
-        extra_claims=_jwt_extra_for_user(user),
-    )
-    return TokenRoleResponse(access_token=token, role="bnb")
+    return out
 
 
-@router.post("/admin/login", response_model=TokenRoleResponse)
+@router.post("/admin/login", response_model=UnifiedLoginResponse, deprecated=True)
 def admin_login(
     payload: AdminLoginRequest,
     db: Session = Depends(get_db),
-) -> TokenRoleResponse:
-    user = get_user_by_email(db, payload.email)
-    if user is None or not verify_user_password(payload.password, user.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid credentials",
-        )
-    role = (getattr(user, "role", None) or "").strip().lower()
-    if role != "admin":
+) -> UnifiedLoginResponse:
+    """Deprecated: prefer ``POST /api/login``."""
+    out = perform_unified_login(db, payload.email, payload.password)
+    if out.role != "admin":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Not an administrator",
         )
-    if not bool(getattr(user, "is_active", True)):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Inactive user",
-        )
-    token = create_access_token(
-        subject=str(int(user.id)),
-        role="admin",
-        extra_claims=_jwt_extra_for_user(user),
-    )
-    return TokenRoleResponse(access_token=token, role="admin")
+    return out
 
 
 @router.post("/driver/register", response_model=DriverRegisterResponse, status_code=status.HTTP_201_CREATED)
@@ -445,32 +555,16 @@ def driver_register(
     )
 
 
-@router.post("/driver/login", response_model=TokenRoleResponse)
+@router.post("/driver/login", response_model=UnifiedLoginResponse, deprecated=True)
 def driver_login(
     payload: DriverLoginRequest,
     db: Session = Depends(get_db),
-) -> TokenRoleResponse:
-    d = get_driver_by_email(db, payload.email)
-    if d is None or not verify_password(payload.password, d.password_hash):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
-        )
-    if not d.is_active:
-        if d.signup_status == "pending":
-            detail = "Your account is pending approval"
-        elif d.signup_status == "rejected":
-            detail = "Your registration was not approved"
-        else:
-            detail = "Account is disabled"
+) -> UnifiedLoginResponse:
+    """Deprecated: prefer ``POST /api/login`` (allows ``users``-linked drivers and legacy ``drivers``)."""
+    out = perform_unified_login(db, payload.email, payload.password)
+    if out.role != "driver":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=detail,
+            detail="Not a driver account",
         )
-    if d.signup_status not in ("active", "legacy"):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account cannot sign in",
-        )
-    token = create_driver_access_token(int(d.id), (d.email or "").strip())
-    return TokenRoleResponse(access_token=token, role="driver")
+    return out

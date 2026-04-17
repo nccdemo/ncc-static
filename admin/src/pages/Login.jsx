@@ -1,6 +1,7 @@
 import { useState } from "react";
-import axios from "axios";
 import { useNavigate } from "react-router-dom";
+
+import api from "../api/axios.js";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -11,14 +12,25 @@ export default function Login() {
     e.preventDefault();
 
     try {
-      const res = await axios.post("http://localhost:8000/api/auth/admin/login", {
+      const res = await api.post("/login", {
         email,
         password,
       });
 
-      localStorage.setItem("token", res.data.access_token);
+      const token = res.data?.access_token || res.data?.token;
+      const role = String(res.data?.role || "").toLowerCase();
+      if (!token) {
+        alert("Risposta non valida dal server");
+        return;
+      }
+      if (role !== "admin") {
+        alert("Questo account non è un amministratore");
+        return;
+      }
 
-      navigate("/");
+      localStorage.setItem("token", token);
+
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       alert("Login fallito");
     }

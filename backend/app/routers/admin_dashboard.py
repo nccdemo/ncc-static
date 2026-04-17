@@ -1,5 +1,7 @@
 """Admin-only aggregates for the dedicated admin dashboard (JWT role ``admin``)."""
 
+import logging
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy import func
@@ -30,6 +32,8 @@ from app.routers.bnb_dashboard import (
 )
 from app.schemas.booking import BookingResponse
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/admin", tags=["admin-dashboard"])
 
 
@@ -38,7 +42,18 @@ def admin_list_bookings(
     db: Session = Depends(get_db),
     _admin: dict = Depends(require_admin),
 ) -> list[BookingResponse]:
-    return get_bookings(db)
+    try:
+        rows = get_bookings(db)
+    except Exception:
+        logger.exception("admin_list_bookings: failed to load bookings")
+        return []
+    out: list[BookingResponse] = []
+    for b in rows:
+        try:
+            out.append(BookingResponse.model_validate(b))
+        except Exception:
+            logger.warning("admin_list_bookings: skipping booking id=%s", getattr(b, "id", "?"), exc_info=True)
+    return out
 
 
 class AdminBnbListRow(BaseModel):

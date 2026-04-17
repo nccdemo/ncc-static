@@ -14,6 +14,7 @@ from app.models.payment import Payment
 from app.models.provider import Provider
 from app.models.referral_visit import ReferralVisit
 from app.models.bnb_commission_transfer import BnbCommissionTransfer
+from app.models.bnb_earning import BnbEarning
 from app.models.driver_wallet import DriverWallet, DriverWalletTransaction
 from app.models.driver_payout import DriverInvoice, DriverPayout
 from app.models.driver_work_log import DriverWorkLog
@@ -45,4 +46,5 @@ __all__ = [
     "Provider",
     "ReferralVisit",
     "BnbCommissionTransfer",
+    "BnbEarning",
 ]

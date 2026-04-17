@@ -17,5 +17,7 @@ class Provider(Base):
     display_name = Column(String, nullable=True)
     city = Column(String, nullable=True)
     referral_code = Column(String, nullable=True, index=True)
+    # URL path segment for public landing: /bnb/{public_slug} (lowercase, unique among B&B).
+    public_slug = Column(String, nullable=True, index=True)
     stripe_account_id = Column(String, nullable=True, index=True)
     total_earnings = Column(Float, nullable=False, default=0.0)

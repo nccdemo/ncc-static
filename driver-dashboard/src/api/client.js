@@ -1,4 +1,4 @@
-import { getToken, redirectToLogin } from '../auth/storage.js'
+import { getToken, redirectToLogin, setRole, setToken } from '../auth/storage.js'
 
 async function readError(res) {
   try {
@@ -49,6 +49,24 @@ export async function apiJson(path, options = {}) {
 
 export function getDriverMe() {
   return apiJson('/driver/me')
+}
+
+export async function loginDriver(body) {
+  const res = await fetch('/api/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const msg = typeof data?.detail === 'string' ? data.detail : res.statusText || 'Login failed'
+    throw new Error(msg)
+  }
+  const token = data?.access_token || data?.token || ''
+  if (!token) throw new Error('Invalid login response')
+  setToken(token)
+  if (data?.role) setRole(String(data.role).toLowerCase())
+  return data
 }
 
 export function getMyTours() {

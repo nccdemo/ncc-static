@@ -41,6 +41,7 @@ _TOUR_INSTANCE_AVAILABILITY_SQL = text(
         ti.id,
         ti.tour_id,
         ti.date,
+        ti.start_time,
         ti.status,
         COALESCE(cap.capacity, 0)::bigint AS capacity,
         COALESCE(book.booked, 0)::bigint AS booked,
@@ -108,11 +109,20 @@ def load_tour_instance_availability(db: Session, tour_id: int) -> list[dict]:
             avail = 0
         vehicles = _vehicles_for_instance(db, iid)
         date_iso = _instance_starts_at_iso(d)
+        raw_time = r.get("start_time")
+        start_time_str = None
+        if raw_time is not None:
+            if hasattr(raw_time, "isoformat"):
+                start_time_str = raw_time.isoformat(timespec="minutes")
+            else:
+                s = str(raw_time).strip()
+                start_time_str = s[:5] if len(s) >= 5 and s[2] == ":" else s
         out.append(
             {
                 "id": iid,
                 "tour_id": tid,
                 "date": date_iso,
+                "start_time": start_time_str,
                 "status": str(status),
                 "capacity": cap,
                 "booked": booked,

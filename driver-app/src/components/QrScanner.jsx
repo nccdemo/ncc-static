@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
 
-export default function QrScanner({ onCheckIn, onBack }) {
+export default function QrScanner({ tripId, onCheckIn, onBack }) {
   const [regionId] = useState(
     () => `qr-${crypto.randomUUID?.() ?? Math.random().toString(36).slice(2, 12)}`
   )
@@ -116,7 +116,15 @@ export default function QrScanner({ onCheckIn, onBack }) {
       </div>
 
       <h1 className="sheet-title">Scan QR</h1>
-      <p className="muted sheet-sub">Point the camera at the passenger code</p>
+      <p className="muted sheet-sub">
+        {tripId != null ? (
+          <>
+            Trip <strong>#{tripId}</strong> — inquadra il codice del passeggero per questo viaggio.
+          </>
+        ) : (
+          'Inquadra il codice del passeggero'
+        )}
+      </p>
 
       <div className="qr-wrap">
         <div id={regionId} className="qr-region" />

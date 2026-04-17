@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time as time_type, timezone
 from uuid import uuid4
 
 from fastapi import HTTPException
@@ -29,6 +29,53 @@ _STATUSES_REQUIRE_ASSIGNED_DRIVER = frozenset(
 
 
 class TripService:
+    @staticmethod
+    def resolve_scheduled_at(db: Session, trip: Trip) -> datetime | None:
+        """
+        Best-effort service start time (UTC-naive, consistent with ``eta`` / ``datetime.utcnow``).
+        Used for marketplace expiry when ``scheduled_at`` was not set explicitly.
+        """
+        if getattr(trip, "scheduled_at", None) is not None:
+            return trip.scheduled_at
+        eta = getattr(trip, "eta", None)
+        if eta is not None:
+            return eta
+        sd = getattr(trip, "service_date", None)
+        if sd is None:
+            return None
+        booking = getattr(trip, "booking", None)
+        if booking is None:
+            booking = (
+                db.query(Booking)
+                .filter(Booking.trip_id == int(trip.id))
+                .order_by(Booking.id.asc())
+                .first()
+            )
+        tm = time_type.min
+        if booking is not None:
+            bt = getattr(booking, "time", None)
+            if isinstance(bt, time_type):
+                tm = bt
+        try:
+            return datetime.combine(sd, tm)
+        except Exception:
+            try:
+                return datetime.combine(sd, time_type.min)
+            except Exception:
+                return None
+
+    @staticmethod
+    def ensure_trip_scheduled_at(db: Session, trip: Trip) -> bool:
+        """Persist ``scheduled_at`` from booking/eta if missing. Returns True if updated."""
+        if getattr(trip, "scheduled_at", None) is not None:
+            return False
+        resolved = TripService.resolve_scheduled_at(db, trip)
+        if resolved is None:
+            return False
+        trip.scheduled_at = resolved
+        db.add(trip)
+        return True
+
     @staticmethod
     def resolve_vehicle_id_for_driver(db: Session, driver_id: int | None) -> int | None:
         if driver_id is None:
@@ -304,11 +351,14 @@ class TripService:
             dropoff_lng=(float(dest_lng) if dest_lng is not None else None),
             tracking_token=str(uuid4()),
             eta=eta,
+            scheduled_at=eta,
             passengers=int(getattr(booking, "people", 1) or 1),
         )
         apply_commission_fields_to_trip(trip, booking)
         db.add(trip)
         db.flush()
+        if trip.scheduled_at is None:
+            TripService.ensure_trip_scheduled_at(db, trip)
         booking.trip_id = trip.id
         if effective_driver_id is not None:
             if getattr(booking, "driver_id", None) is None:
@@ -360,6 +410,95 @@ class TripService:
         return trip
 
     @staticmethod
+    def _naive_utc(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            return dt
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+    @staticmethod
+    def create_dispatch_transfer_trip(
+        db: Session,
+        *,
+        customer_name: str,
+        pickup: str,
+        dropoff: str,
+        ride_at: datetime,
+    ) -> Trip:
+        """
+        Manual / dispatcher transfer: open marketplace trip (no driver) plus a confirmed
+        booking so ``GET /api/driver/today-trips`` can surface it after assignment.
+        """
+        ride_at = TripService._naive_utc(ride_at)
+        svc_date = ride_at.date()
+        trip = Trip(
+            status=TripStatus.SCHEDULED,
+            driver_id=None,
+            vehicle_id=None,
+            service_date=svc_date,
+            pickup=(pickup or "").strip(),
+            destination=(dropoff or "").strip(),
+            scheduled_at=ride_at,
+            eta=ride_at,
+            passengers=1,
+            tracking_token=str(uuid4()),
+            notes=f"Customer: {(customer_name or '').strip()}",
+        )
+        try:
+            from app.services.geocoding import geocode_address
+
+            pu = trip.pickup
+            if pu:
+                g = geocode_address(str(pu))
+                if g is not None:
+                    plat, plng = g
+                    trip.pickup_lat = plat
+                    trip.pickup_lng = plng
+            dest = trip.destination
+            if dest:
+                g = geocode_address(str(dest))
+                if g is not None:
+                    dlat, dlng = g
+                    trip.destination_lat = dlat
+                    trip.destination_lng = dlat
+                    trip.dropoff_lat = dlat
+                    trip.dropoff_lng = dlng
+        except Exception:
+            pass
+
+        db.add(trip)
+        db.flush()
+        TripService.ensure_trip_scheduled_at(db, trip)
+
+        booking = Booking(
+            customer_name=(customer_name or "").strip() or "—",
+            email="dispatch@example.com",
+            phone="—",
+            date=svc_date,
+            time=ride_at.time(),
+            people=1,
+            price=0.0,
+            status="confirmed",
+            pickup=trip.pickup,
+            destination=trip.destination,
+            trip_id=int(trip.id),
+            pickup_latitude=trip.pickup_lat,
+            pickup_longitude=trip.pickup_lng,
+            dropoff_latitude=trip.dropoff_lat,
+            dropoff_longitude=trip.dropoff_lng,
+        )
+        db.add(booking)
+        apply_commission_fields_to_trip(trip, booking)
+        db.add(trip)
+        db.commit()
+        db.refresh(trip)
+
+        manager.broadcast_sync(
+            {"event": "trip_updated", "trip_id": trip.id, "status": trip.status.value}
+        )
+        TripService._broadcast_trip_live_update(db=db, trip=trip)
+        return trip
+
+    @staticmethod
     def driver_claim_trip(db: Session, trip_id: int, driver_id: int) -> Trip:
         """
         Marketplace accept: first driver wins. Sets ASSIGNED and assigns driver_id.
@@ -402,6 +541,7 @@ class TripService:
                         if vid is not None:
                             b.vehicle_id = int(vid)
                         db.add(b)
+                    TripService.ensure_trip_scheduled_at(db, trip)
                     db.add(trip)
                     db.commit()
                     db.refresh(trip)
@@ -427,6 +567,7 @@ class TripService:
                 b.vehicle_id = int(vid)
             db.add(b)
         db.add(trip)
+        TripService.ensure_trip_scheduled_at(db, trip)
         db.commit()
         db.refresh(trip)
 
@@ -527,6 +668,69 @@ class TripService:
         db.refresh(trip)
 
         # Trip rejected: driver is available again.
+        TripService._set_driver_status(db=db, driver_id=prev_driver_id, status="available")
+
+        manager.broadcast_sync(
+            {"event": "trip_updated", "trip_id": trip.id, "status": trip.status.value}
+        )
+        TripService._broadcast_trip_live_update(db=db, trip=trip)
+        return trip
+
+    @staticmethod
+    def admin_cancel_trip(db: Session, trip: Trip) -> Trip:
+        """
+        Admin cancellation: ``CANCELLED``, clears driver/vehicle; frees previous driver if any.
+        """
+        if trip.status in (TripStatus.COMPLETED, TripStatus.EXPIRED, TripStatus.CANCELLED):
+            raise HTTPException(
+                status_code=400,
+                detail="Trip is already completed, expired, or cancelled",
+            )
+        prev_driver_id = trip.driver_id
+        trip.status = TripStatus.CANCELLED
+        trip.driver_id = None
+        trip.vehicle_id = None
+        trip.assigned_at = None
+        trip.last_assigned_at = None
+        db.commit()
+        db.refresh(trip)
+
+        TripService._set_driver_status(db=db, driver_id=prev_driver_id, status="available")
+
+        manager.broadcast_sync(
+            {"event": "trip_updated", "trip_id": trip.id, "status": trip.status.value}
+        )
+        TripService._broadcast_trip_live_update(db=db, trip=trip)
+        return trip
+
+    @staticmethod
+    def driver_cancel_own_trip(db: Session, *, trip: Trip, driver_id: int) -> Trip:
+        """
+        Driver-initiated cancellation: only ``ACCEPTED`` trips for the assigned driver.
+        Sets ``CANCELLED``, clears assignment; does not delete the row.
+        """
+        if getattr(trip, "driver_id", None) is None or int(trip.driver_id) != int(driver_id):
+            raise HTTPException(status_code=403, detail="Not your trip")
+        if trip.status in (TripStatus.COMPLETED, TripStatus.EXPIRED, TripStatus.CANCELLED):
+            raise HTTPException(
+                status_code=400,
+                detail="Trip cannot be cancelled in current status",
+            )
+        if trip.status != TripStatus.ACCEPTED:
+            raise HTTPException(
+                status_code=400,
+                detail="Only accepted trips can be cancelled by the driver",
+            )
+
+        prev_driver_id = trip.driver_id
+        trip.status = TripStatus.CANCELLED
+        trip.driver_id = None
+        trip.vehicle_id = None
+        trip.assigned_at = None
+        trip.last_assigned_at = None
+        db.commit()
+        db.refresh(trip)
+
         TripService._set_driver_status(db=db, driver_id=prev_driver_id, status="available")
 
         manager.broadcast_sync(

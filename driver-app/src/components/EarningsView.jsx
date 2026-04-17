@@ -9,7 +9,7 @@ function formatEUR(v) {
 }
 
 export default function EarningsView({ driverId, onBack }) {
-  const [report, setReport] = useState(null)
+  const [wallet, setWallet] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -17,12 +17,12 @@ export default function EarningsView({ driverId, onBack }) {
     setLoading(true)
     setError('')
     try {
-      const { data } = await api.get(`/drivers/${driverId}/report`)
-      setReport(data || null)
+      const { data } = await api.get(`/drivers/${driverId}/wallet`)
+      setWallet(data || null)
     } catch (e) {
       console.error(e)
       setError(formatApiDetail(e.response?.data?.detail) || 'Could not load earnings')
-      setReport(null)
+      setWallet(null)
     } finally {
       setLoading(false)
     }
@@ -32,7 +32,13 @@ export default function EarningsView({ driverId, onBack }) {
     load()
   }, [load])
 
-  const r = report || {}
+  const w = wallet || {}
+  const totalEarnings = Number(w.total_earnings ?? 0)
+  const tripsCount = Number(w.trips_count ?? 0)
+  const pendingPayouts = Number(w.pending_payouts ?? 0)
+  const pendingCount = Number(w.pending_payouts_count ?? 0)
+  const cashBalance = Number(w.balance ?? 0)
+  const txs = Array.isArray(w.transactions) ? w.transactions : []
 
   return (
     <div className="screen">
@@ -51,57 +57,59 @@ export default function EarningsView({ driverId, onBack }) {
         </div>
       </div>
 
-      <h1 className="sheet-title">Earnings</h1>
-      <p className="muted sheet-sub">Driver #{driverId}</p>
+      <h1 className="sheet-title">Guadagni</h1>
+      <p className="muted sheet-sub">Panoramica da portafoglio NCC</p>
 
-      {loading && <p className="muted center-pad">Loading…</p>}
+      {loading && <p className="muted center-pad">Caricamento…</p>}
       {error && <p className="banner error">{error}</p>}
 
-      {!loading && !error && report ? (
+      {!loading && !error && wallet ? (
         <>
-          <section className="panel">
-            <h2>Today</h2>
-            <p className="big-balance" style={{ marginTop: '0.75rem' }}>
-              {formatEUR(r.today_driver_net)}
+          <section className="service-grid" style={{ marginTop: '0.75rem' }}>
+            <div className="service-box">
+              <div className="service-label">Guadagni totali (netto)</div>
+              <div className="service-value">{formatEUR(totalEarnings)}</div>
+              <p className="muted-sm" style={{ margin: '0.35rem 0 0', fontSize: '0.8rem' }}>
+                Da pagamenti sui tuoi viaggi (al netto commissioni piattaforma)
+              </p>
+            </div>
+            <div className="service-box">
+              <div className="service-label">Viaggi completati</div>
+              <div className="service-value">{Number.isFinite(tripsCount) ? tripsCount : '—'}</div>
+            </div>
+            <div className="service-box">
+              <div className="service-label">Pagamenti in sospeso</div>
+              <div className="service-value">{formatEUR(pendingPayouts)}</div>
+              <p className="muted-sm" style={{ margin: '0.35rem 0 0', fontSize: '0.8rem' }}>
+                {pendingCount > 0
+                  ? `${pendingCount} batch in attesa di conferma / bonifico`
+                  : 'Nessun batch in sospeso'}
+              </p>
+            </div>
+          </section>
+
+          <section className="panel" style={{ marginTop: '1rem' }}>
+            <h2>Wallet cash</h2>
+            <p className="big-balance" style={{ marginTop: '0.5rem' }}>
+              {formatEUR(cashBalance)}
             </p>
-            <p className="muted-sm">Your net today (after platform fee)</p>
-            <div className="service-grid" style={{ marginTop: '0.75rem' }}>
-              <div className="service-box">
-                <div className="service-label">Trip gross today</div>
-                <div className="service-value">{formatEUR(r.today_gross_earnings)}</div>
-              </div>
-              <div className="service-box">
-                <div className="service-label">Platform fee today</div>
-                <div className="service-value">{formatEUR(r.today_commission_paid)}</div>
-              </div>
-            </div>
+            <p className="muted-sm">Commissioni cash da versare alla piattaforma (se applicabile)</p>
           </section>
 
-          <section className="panel">
-            <h2>All time</h2>
-            <p className="big-balance">{formatEUR(r.driver_net)}</p>
-            <p className="muted-sm">Your net (after platform fees on your rides)</p>
-            <div className="service-grid" style={{ marginTop: '0.75rem' }}>
-              <div className="service-box">
-                <div className="service-label">Trip gross</div>
-                <div className="service-value">{formatEUR(r.gross_earnings)}</div>
-              </div>
-              <div className="service-box">
-                <div className="service-label">Platform fees (total)</div>
-                <div className="service-value">{formatEUR(r.commission_paid)}</div>
-              </div>
-              <div className="service-box">
-                <div className="service-label">Completed rides</div>
-                <div className="service-value">{r.total_rides ?? '—'}</div>
-              </div>
-            </div>
-          </section>
-
-          <section className="panel">
-            <h2>Wallet</h2>
-            <p className="big-balance">{formatEUR(r.wallet_balance)}</p>
-            <p className="muted-sm">Cash commission you owe the platform (from cash rides)</p>
-          </section>
+          {txs.length > 0 ? (
+            <section className="panel" style={{ marginTop: '1rem' }}>
+              <h2>Movimenti wallet</h2>
+              <ul className="muted-sm" style={{ margin: '0.5rem 0 0', paddingLeft: '1.1rem' }}>
+                {txs.slice(0, 12).map((t) => (
+                  <li key={t.id} style={{ marginBottom: '0.35rem' }}>
+                    <strong>{formatEUR(t.amount)}</strong>
+                    {t.type ? ` · ${t.type}` : ''}
+                    {t.created_at ? ` · ${t.created_at}` : ''}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ) : null}
         </>
       ) : null}
     </div>

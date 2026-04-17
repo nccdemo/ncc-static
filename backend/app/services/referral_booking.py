@@ -9,6 +9,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from starlette import status
 
+from app.models.bnb_earning import BnbEarning
+from app.models.payment import Payment
 from app.models.provider import Provider
 
 # Stored referral codes on B&B rows are 6-char A-Z0-9; allow same shape for inbound ?ref= / API.
@@ -58,6 +60,10 @@ def resolve_valid_bnb_referral(db: Session, referral_code: str | None) -> tuple[
     return code, int(provider.id)
 
 
+# B&B share of card gross when a valid referral is present (see ``marketplace_checkout_split_eur``).
+BNB_REFERRAL_COMMISSION_RATE = 0.10
+
+
 def increment_provider_bnb_earnings(db: Session, provider_id: int, commission_eur: float) -> None:
     """
     Add B&B commission (EUR) to ``providers.total_earnings`` after a successful card payment.
@@ -77,6 +83,66 @@ def increment_provider_bnb_earnings(db: Session, provider_id: int, commission_eu
     cur = float(getattr(prov, "total_earnings", 0) or 0)
     prov.total_earnings = round(cur + amt, 2)
     db.add(prov)
+
+
+def record_bnb_commission_after_payment(
+    db: Session,
+    *,
+    payment: Payment,
+    bnb_provider_id: int | None,
+    commission_eur: float,
+    gross_eur: float | None = None,
+) -> None:
+    """
+    After a successful card ``Payment``: bump ``Provider.total_earnings`` and insert ``bnb_earnings``.
+
+    Idempotent per ``payment_id`` (duplicate webhook / retry).
+    """
+    try:
+        pk = int(bnb_provider_id) if bnb_provider_id is not None else None
+    except (TypeError, ValueError):
+        return
+    if pk is None or pk < 1:
+        return
+    amt = round(float(commission_eur or 0), 2)
+    if amt <= 0:
+        return
+    increment_provider_bnb_earnings(db, pk, amt)
+    db.flush()
+    pid = getattr(payment, "id", None)
+    if pid is None:
+        return
+    try:
+        bid = int(getattr(payment, "booking_id", 0) or 0)
+    except (TypeError, ValueError):
+        return
+    if bid < 1:
+        return
+    gross = round(float(gross_eur if gross_eur is not None else getattr(payment, "amount", 0) or 0), 2)
+    if db.query(BnbEarning.id).filter(BnbEarning.payment_id == int(pid)).first():
+        return
+    db.add(
+        BnbEarning(
+            bnb_id=pk,
+            booking_id=bid,
+            payment_id=int(pid),
+            gross_amount_eur=gross,
+            commission_eur=amt,
+            commission_rate=float(BNB_REFERRAL_COMMISSION_RATE),
+        )
+    )
+
+
+def apply_referral_to_booking(db: Session, booking: object, referral_code: str | None = None) -> None:
+    """Resolve ``referral_code`` / stored code on ``booking`` and set ``bnb_id``, ``referral_code``, ``has_bnb``."""
+    if booking is None or not hasattr(booking, "referral_code"):
+        return
+    raw = referral_code if referral_code is not None else getattr(booking, "referral_code", None)
+    ref, bnb = resolve_valid_bnb_referral(db, raw)
+    booking.referral_code = ref
+    booking.bnb_id = bnb
+    booking.has_bnb = bool(bnb)
+    db.add(booking)
 
 
 def resolve_bnb_provider_id(db: Session, referral_code: str | None) -> tuple[str | None, int | None]:

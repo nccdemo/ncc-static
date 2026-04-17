@@ -66,6 +66,7 @@ class TourInstanceAvailabilityResponse(BaseModel):
     id: int
     tour_id: int
     date: str | None = None  # ISO 8601 datetime (instance start of day)
+    start_time: str | None = Field(None, description="Local start time HH:MM if set.")
     status: str
     capacity: int
     booked: int

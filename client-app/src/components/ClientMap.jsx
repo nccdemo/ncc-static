@@ -117,7 +117,7 @@ export default function ClientMap() {
   useEffect(() => {
     const fetchLocation = async () => {
       try {
-        const res = await fetch('http://localhost:8000/api/drivers/1/location')
+        const res = await fetch('/api/drivers/1/location')
         if (!res.ok) {
           console.error('Driver location request failed:', res.status)
           return

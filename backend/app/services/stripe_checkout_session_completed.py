@@ -5,7 +5,7 @@ Stripe ``checkout.session.completed`` → tour instance booking fulfillment.
 
 This module implements:
 
-2. Extract metadata (``tour_instance_id``, ``seats``, ``customer_name``, ``referral_code``, …).
+2. Extract metadata (``tour_id``, ``tour_instance_id``, ``date``, ``people``, ``referral_code``, ``customer_name``, …).
 3. Load ``TourInstance`` (with ``tour_id`` inferred from DB if omitted in metadata).
 4. Re-check available seats (capacity vs held bookings, ``FOR UPDATE``).
 5. Create ``Booking`` (``status='confirmed'``, ``stripe_session_id``).
@@ -13,7 +13,7 @@ This module implements:
    computed availability (same constants as checkout).
 7. If ``referral_code`` resolves, set ``bnb_id`` on the booking.
 8. Split gross into driver / B&B / platform (``marketplace_checkout_split_eur``) and insert ``Payment``.
-9. ``increment_provider_bnb_earnings`` → updates ``Provider.total_earnings`` for the B&B.
+9. ``record_bnb_commission_after_payment`` → ``Provider.total_earnings`` + ``bnb_earnings`` row for the B&B.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import threading
+from datetime import date as DateType
 from datetime import time as Time
 from pathlib import Path
 
@@ -34,7 +35,7 @@ from app.models.tour_instance import TourInstance
 from app.routers.tour_instances import _instance_blocks_new_bookings
 from app.services.email_service import send_booking_email
 from app.services.payment_ledger import marketplace_checkout_split_eur
-from app.services.referral_booking import increment_provider_bnb_earnings, resolve_valid_bnb_referral
+from app.services.referral_booking import record_bnb_commission_after_payment, resolve_valid_bnb_referral
 from app.services.checkout_balance_transfers import run_post_checkout_balance_transfers
 from app.services.tour_stripe_booking import (
     parse_seats_from_tour_checkout_metadata,
@@ -52,6 +53,22 @@ from app.services.websocket_manager import manager
 logger = logging.getLogger(__name__)
 
 
+def _customer_email_from_stripe_checkout_session(session: dict) -> str | None:
+    """Email entered on Stripe Checkout when ``customer_email`` was omitted at session creation."""
+    em = session.get("customer_email")
+    if em:
+        s = str(em).strip()
+        if s:
+            return s
+    cd = session.get("customer_details") or {}
+    em2 = cd.get("email")
+    if em2:
+        s = str(em2).strip()
+        if s:
+            return s
+    return None
+
+
 def _webhook_reject(db: Session, body: dict) -> JSONResponse:
     """End DB transaction and return a 200 JSON body (Stripe expects 2xx)."""
     try:
@@ -62,20 +79,26 @@ def _webhook_reject(db: Session, body: dict) -> JSONResponse:
 
 
 def normalize_tour_checkout_metadata(db: Session, md: dict) -> dict:
-    """Ensure ``tour_id`` is present when only ``tour_instance_id`` was stored in Stripe metadata."""
+    """
+    Normalize tour Checkout metadata for webhooks.
+
+    - Ensures ``tour_id`` when only ``tour_instance_id`` is present.
+    - Backfills ``date`` (YYYY-MM-DD) from the instance when missing (older sessions).
+    """
     out = dict(md or {})
-    if out.get("tour_id"):
-        return out
     raw_iid = out.get("tour_instance_id")
-    if raw_iid is None or str(raw_iid).strip() == "":
-        return out
-    try:
-        iid = int(str(raw_iid).strip())
-    except (TypeError, ValueError):
-        return out
-    inst = db.query(TourInstance).filter(TourInstance.id == iid).first()
+    inst: TourInstance | None = None
+    if raw_iid is not None and str(raw_iid).strip() != "":
+        try:
+            iid = int(str(raw_iid).strip())
+            inst = db.query(TourInstance).filter(TourInstance.id == iid).first()
+        except (TypeError, ValueError):
+            inst = None
     if inst is not None:
-        out["tour_id"] = str(int(inst.tour_id))
+        if not (str(out.get("tour_id") or "").strip()):
+            out["tour_id"] = str(int(inst.tour_id))
+        if not (str(out.get("date") or "").strip()) and getattr(inst, "date", None) is not None:
+            out["date"] = inst.date.isoformat()[:10]
     return out
 
 
@@ -103,12 +126,11 @@ def fulfill_tour_instance_checkout_session(
         tour_id = int(md["tour_id"])
         instance_id = int(md["tour_instance_id"])
         customer_name = str(md.get("customer_name") or md.get("name") or "").strip()
-        email = str(md["email"])
+        email_raw = str(md.get("email") or "").strip()
+        email = email_raw or _customer_email_from_stripe_checkout_session(session) or "customer@example.com"
         phone_raw = md.get("customer_phone") or md.get("phone")
         customer_phone = str(phone_raw).strip() if phone_raw not in (None, "") else "N/A"
         passengers = parse_seats_from_tour_checkout_metadata(md)
-        if passengers is None and md.get("passengers") not in (None, ""):
-            passengers = int(md["passengers"])
     except Exception as e:
         return JSONResponse(status_code=200, content={"status": "error", "detail": f"Bad tour metadata: {e}"})
     if passengers is None or int(passengers) < 1:
@@ -136,6 +158,20 @@ def fulfill_tour_instance_checkout_session(
                 db,
                 {"status": "error", "detail": "Tour instance not found"},
             )
+
+        md_date_raw = (md.get("date") or "").strip()
+        if md_date_raw:
+            try:
+                md_day = DateType.fromisoformat(md_date_raw[:10])
+                if md_day != instance.date:
+                    logger.warning(
+                        "Tour checkout metadata date %s != instance.date %s (instance_id=%s); using DB instance date",
+                        md_day,
+                        instance.date,
+                        instance.id,
+                    )
+            except ValueError:
+                logger.warning("Tour checkout metadata date invalid: %r", md_date_raw)
 
         if _instance_blocks_new_bookings(instance):
             return _webhook_reject(
@@ -169,8 +205,9 @@ def fulfill_tour_instance_checkout_session(
         if tour is None:
             return _webhook_reject(db, {"status": "error", "detail": "Tour not found"})
 
-        # --- Step 7: referral → BNB ---
-        referral_code, bnb_id = resolve_valid_bnb_referral(db, md.get("referral_code"))
+        # --- Step 7: referral → BNB (canonical ``referral_code`` from Checkout metadata) ---
+        ref_in = (md.get("referral_code") or "").strip() or None
+        referral_code, bnb_id = resolve_valid_bnb_referral(db, ref_in)
         has_bnb = bool(bnb_id)
         inst_override = getattr(instance, "price", None)
         if inst_override is not None:
@@ -184,6 +221,9 @@ def fulfill_tour_instance_checkout_session(
 
         driver_id_booking = resolve_driver_id_for_tour_booking(db, instance, md)
 
+        start_t = getattr(instance, "start_time", None)
+        booking_time = start_t if start_t is not None else Time(0, 0)
+
         # --- Step 5 & 6: booking row (reduces available seats computationally) ---
         booking = Booking(
             tour_id=tour_id,
@@ -193,7 +233,7 @@ def fulfill_tour_instance_checkout_session(
             email=email,
             phone=customer_phone,
             date=instance.date,
-            time=Time(0, 0),
+            time=booking_time,
             people=passengers,
             base_price=total_base,
             price=final_total,
@@ -248,9 +288,15 @@ def fulfill_tour_instance_checkout_session(
             },
         )
 
-        # --- Step 9: BNB total_earnings ---
-        if pk_bnb is not None:
-            increment_provider_bnb_earnings(db, int(pk_bnb), float(bnb_e))
+        # --- Step 9: BNB total_earnings + bnb_earnings audit row ---
+        if pk_bnb is not None and float(bnb_e or 0) > 0:
+            record_bnb_commission_after_payment(
+                db,
+                payment=payment,
+                bnb_provider_id=int(pk_bnb),
+                commission_eur=float(bnb_e),
+                gross_eur=float(amount_total),
+            )
         try:
             db.commit()
             db.refresh(booking)

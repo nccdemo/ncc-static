@@ -2,16 +2,22 @@ import os
 from pathlib import Path
 from datetime import date as Date
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.constants.booking_capacity import HELD_BOOKING_STATUSES
 from app.database import get_db
 from app.deps.auth import require_admin
 from app.models.booking import Booking
+from app.models.bnb_commission_transfer import BnbCommissionTransfer
 from app.models.driver import Driver
+from app.models.driver_schedule import DriverSchedule
+from app.models.payment import Payment
+from app.models.quote import Quote
+from app.models.service_log import ServiceLog
 from app.models.tour import Tour
 from app.models.tour_instance import TourInstance
 from app.models.tour_instance_vehicle import TourInstanceVehicle
@@ -52,9 +58,6 @@ def _instance_occupies_calendar_slot(instance: TourInstance) -> bool:
     if st == "scheduled":
         return True
     return st not in ("cancelled",)
-
-
-_NON_DELETABLE_BOOKING_STATUSES: frozenset[str] = frozenset({"paid", "confirmed"})
 
 
 class AssignRequest(BaseModel):
@@ -570,33 +573,75 @@ def delete_instance(
     db: Session = Depends(get_db),
     _admin: dict = Depends(require_admin),
 ) -> dict:
+    """
+    Remove a tour instance and dependent rows in a single DB transaction (commit once).
+
+    Order: quotes → service_logs → payments → (clear bnb_commission_transfers.booking_id) →
+    bookings → driver_schedules → instance vehicles → trips (tour_instance_id) → instance.
+    """
     instance = db.query(TourInstance).filter(TourInstance.id == instance_id).first()
     if instance is None:
-        raise HTTPException(status_code=404, detail="Tour instance not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Turno non trovato")
 
-    bookings = db.query(Booking).filter(Booking.tour_instance_id == instance_id).all()
-    if bookings:
-        bad = [
-            b
-            for b in bookings
-            if str(getattr(b, "status", "") or "").strip().lower() in _NON_DELETABLE_BOOKING_STATUSES
+    try:
+        booking_ids = [
+            int(row[0])
+            for row in db.query(Booking.id).filter(Booking.tour_instance_id == instance_id).all()
         ]
-        if bad:
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"Impossibile eliminare: ci sono prenotazioni pagate o confermate. "
-                    f"Usa «Annulla turno» (POST /api/tour-instances/{instance_id}/cancel) per chiudere il turno "
-                    "senza eliminare lo storico."
-                ),
-            )
-        for b in bookings:
-            db.delete(b)
-        db.flush()
 
-    db.query(TourInstanceVehicle).filter(TourInstanceVehicle.tour_instance_id == instance_id).delete()
-    db.delete(instance)
-    db.commit()
+        if booking_ids:
+            # 1) Quotes linked to these bookings (FK to bookings, usually no ON DELETE CASCADE)
+            db.query(Quote).filter(Quote.booking_id.in_(booking_ids)).delete(synchronize_session=False)
+            # 2) Service logs (FK to bookings)
+            db.query(ServiceLog).filter(ServiceLog.booking_id.in_(booking_ids)).delete(
+                synchronize_session=False
+            )
+            # 3) Payments (explicit delete; many DBs use ON DELETE CASCADE, SQLite may vary)
+            db.query(Payment).filter(Payment.booking_id.in_(booking_ids)).delete(
+                synchronize_session=False
+            )
+            # 4) Orphan commission transfer pointers (no FK, keep row history)
+            db.query(BnbCommissionTransfer).filter(BnbCommissionTransfer.booking_id.in_(booking_ids)).update(
+                {BnbCommissionTransfer.booking_id: None},
+                synchronize_session=False,
+            )
+            # 5) Bookings
+            db.query(Booking).filter(Booking.id.in_(booking_ids)).delete(synchronize_session=False)
+
+        # 6) Driver schedules for this instance (explicit; DB may also SET NULL on instance delete)
+        db.query(DriverSchedule).filter(DriverSchedule.tour_instance_id == instance_id).delete(
+            synchronize_session=False
+        )
+
+        # 7) Fleet rows for this instance
+        db.query(TourInstanceVehicle).filter(TourInstanceVehicle.tour_instance_id == instance_id).delete(
+            synchronize_session=False
+        )
+
+        # 8) Trips bound to this instance (bookings already removed)
+        db.query(Trip).filter(Trip.tour_instance_id == instance_id).delete(synchronize_session=False)
+
+        # 9) Instance
+        db.delete(instance)
+        db.commit()
+    except IntegrityError as error:
+        db.rollback()
+        print(error)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Impossibile eliminare il turno: alcuni record collegati non sono stati rimossi "
+                "(vincolo sul database). Verifica log o contatta il supporto."
+            ),
+        ) from error
+    except Exception as error:
+        db.rollback()
+        print(error)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Eliminazione del turno non completata. Riprova tra poco o verifica i log del server.",
+        ) from error
+
     return {"success": True, "id": instance_id}
 
 

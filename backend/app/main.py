@@ -1,12 +1,24 @@
 from dotenv import load_dotenv
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import FastAPI
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
 
 import json
+import logging
+import os
+import zlib
+from contextlib import asynccontextmanager
 from pathlib import Path
+
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    scheduler_available = True
+except ImportError:
+    BackgroundScheduler = None  # type: ignore[misc, assignment]
+    scheduler_available = False
 
 from sqlalchemy import func, inspect, text
 from sqlalchemy.orm import Session
@@ -15,6 +27,7 @@ from app.database import Base, SessionLocal, engine, get_db
 from app.models import (  # noqa: F401
     availability,
     bnb_commission_transfer,
+    bnb_earning,
     booking,
     provider,
     referral_visit,
@@ -32,12 +45,7 @@ from app.models import (  # noqa: F401
     user,
     vehicle,
 )
-from app.routers.auth import (
-    AdminLoginRequest,
-    AccessTokenResponse,
-    require_users_table_user,
-    router as auth_router,
-)
+from app.routers.auth import router as auth_router
 from app.routers.admin_dashboard import router as admin_dashboard_router
 from app.routers.bnb_dashboard import router as bnb_dashboard_router
 from app.routers.bnb_register import router as bnb_register_router
@@ -50,6 +58,7 @@ from app.routers.drivers import router as drivers_router
 from app.routers.flights import router as flights_router
 from app.routers.payments import router as payments_router
 from app.routers.payments_tracking import router as payments_tracking_router
+from app.routers.admin_bookings import router as admin_bookings_router
 from app.routers.qr import router as qr_router
 from app.routers.service_sheet import router as service_sheet_router
 from app.routers.service_log import router as service_log_router
@@ -73,30 +82,63 @@ from app.routers.driver_accounting import router as driver_accounting_router
 from app.routers.calendar_router import router as calendar_router
 from app.routers.debug import router as debug_router
 from app.routers.driver_dashboard import router as driver_dashboard_router
+from app.routers.driver_stripe import router as driver_stripe_router
 from app.routers import tour_instances
 from app.routers.public_tour_instances import router as public_tour_instances_router
 from app.routers.tour_booking_checkout import router as tour_booking_checkout_router
 from app.routers.referral_tracking import router as referral_tracking_router
+from app.routers.checkout_public import router as checkout_public_router
 from app.middleware.referral_subdomain import ReferralSubdomainMiddleware
 
-app = FastAPI(title="NCC Backend", version="1.0.0", redirect_slashes=True)
+logger = logging.getLogger(__name__)
 
-_root_login_router = APIRouter(tags=["auth"])
+# Postgres ``pg_advisory_xact_lock`` key for serialized DDL bootstrap (shared across workers).
+LOCK_KEY = zlib.adler32(b"sanculino_bootstrap")
 
-
-@_root_login_router.post("/login", response_model=AccessTokenResponse)
-def login_at_api_root(
-    payload: AdminLoginRequest,
-    db: Session = Depends(get_db),
-) -> AccessTokenResponse:
-    """``POST /login`` — check ``users`` table; temp fixed token (no JWT)."""
-    require_users_table_user(db, payload.email, payload.password)
-    return AccessTokenResponse(access_token="testtoken", token_type="bearer")
+_scheduler = BackgroundScheduler() if scheduler_available else None
 
 
-app.include_router(_root_login_router)
-app.include_router(bnb_register_router)
-app.include_router(referral_tracking_router, prefix="/api")
+def _trip_cleanup_scheduler_enabled() -> bool:
+    return (os.getenv("TRIP_CLEANUP_SCHEDULER_ENABLED") or "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+@asynccontextmanager
+async def _app_lifespan(_app: FastAPI):
+    if not scheduler_available:
+        logger.warning("APScheduler not installed, skipping scheduler")
+    elif _scheduler is not None and _trip_cleanup_scheduler_enabled():
+        from app.jobs.cleanup_trips import cleanup_trips
+
+        _scheduler.add_job(
+            cleanup_trips,
+            "interval",
+            minutes=10,
+            id="cleanup_trips",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=300,
+        )
+        _scheduler.start()
+        logger.info("Scheduler started")
+    try:
+        yield
+    finally:
+        if _scheduler is not None and _scheduler.running:
+            _scheduler.shutdown(wait=False)
+
+
+app = FastAPI(
+    title="NCC Backend",
+    version="1.0.0",
+    redirect_slashes=True,
+    lifespan=_app_lifespan,
+)
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -106,10 +148,11 @@ origins = [
     "http://localhost:5175",  # landing / partner onboarding
     "http://localhost:5178",  # B&B partner portal
     "http://localhost:5176",  # admin-dashboard
-    "http://localhost:5191",  # ncc-saas-dashboard (public + admin shell)
+    "http://localhost:5191",  # admin-saas (public + admin shell)
+    "http://localhost:5196",  # admin-saas dev (alternate port)
     "http://localhost:3000",  # admin
     "http://localhost:5177",  # driver dashboard
-    "http://localhost:5180",  # ncc-portal (unified admin + driver)
+    "http://localhost:5180",  # portal (unified admin + driver)
     # Some browsers/dev setups use 127.0.0.1 instead of localhost
     "http://127.0.0.1:5173",
     "http://127.0.0.1:5174",
@@ -117,11 +160,14 @@ origins = [
     "http://127.0.0.1:5178",
     "http://127.0.0.1:5176",
     "http://127.0.0.1:5191",
+    "http://127.0.0.1:5196",
     "http://127.0.0.1:3000",
     "http://127.0.0.1:5177",
     "http://127.0.0.1:5180",
 ]
 
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+app.add_middleware(ReferralSubdomainMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -129,10 +175,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(GZipMiddleware, minimum_size=1000)
-app.add_middleware(ReferralSubdomainMiddleware)
 
-# Static files and uploads (served under API_PUBLIC_URL, e.g. http://localhost:8000/uploads/...)
+# Static files and uploads at ``/static`` and ``/uploads`` (same-origin in prod behind a reverse proxy).
 BASE_DIR = Path(__file__).resolve().parent.parent  # backend/
 STATIC_DIR = BASE_DIR / "static"
 UPLOADS_DIR = BASE_DIR / "uploads"
@@ -143,21 +187,57 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # Serves ``backend/uploads`` at ``/uploads`` (e.g. ``/uploads/bnb/bnb_1.png``).
 app.mount("/uploads", StaticFiles(directory=str(UPLOADS_DIR)), name="uploads")
 
+
+def _ensure_pg_trip_status_expired_enum() -> None:
+    """
+    Add ``EXPIRED`` to ``trip_status`` in its own short transaction.
+
+    Keeping this out of the long bootstrap ``engine.begin()`` avoids holding
+    ``ALTER TYPE`` / migration locks across hundreds of DDL statements (which can
+    block normal queries on workers that share the same database).
+    """
+    if engine.dialect.name != "postgresql":
+        return
+    try:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TYPE trip_status ADD VALUE IF NOT EXISTS 'EXPIRED'"))
+    except Exception:
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        """
+                        DO $$
+                        BEGIN
+                          IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'trip_status')
+                             AND NOT EXISTS (
+                               SELECT 1 FROM pg_enum e
+                               JOIN pg_type t ON e.enumtypid = t.oid
+                               WHERE t.typname = 'trip_status' AND e.enumlabel = 'EXPIRED'
+                             ) THEN
+                            ALTER TYPE trip_status ADD VALUE 'EXPIRED';
+                          END IF;
+                        END $$;
+                        """
+                    )
+                )
+        except Exception as e:
+            print("WARN trip_status EXPIRED enum:", str(e))
+
+
 Base.metadata.create_all(bind=engine)
 
 # Lightweight bootstrap for multi-tenant columns on existing DBs.
 # SQLAlchemy create_all() does NOT add missing columns.
 
 with engine.begin() as conn:
-    # Prevent deadlocks during uvicorn --reload (multiple processes running DDL).
-    # Advisory locks are Postgres-only; safely skip for SQLite/others.
-    locked = False
-    try:
-        if engine.dialect.name == "postgresql":
-            conn.execute(text("SELECT pg_advisory_lock(987654321);"))
-            locked = True
-    except Exception:
-        locked = False
+    # Serialize bootstrap DDL across uvicorn --reload workers (Postgres only).
+    # Transaction-scoped advisory lock — released automatically when this block commits/rolls back.
+    if engine.dialect.name == "postgresql":
+        try:
+            conn.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": LOCK_KEY})
+        except Exception as e:
+            logger.warning("Advisory lock failed: %s", e)
 
     # Merge legacy tours.image_url into tours.images[], then drop image_url (images-only model).
     try:
@@ -327,6 +407,10 @@ with engine.begin() as conn:
     conn.execute(text('CREATE INDEX IF NOT EXISTS ix_drivers_stripe_account_id ON drivers (stripe_account_id);'))
     conn.execute(text('ALTER TABLE IF EXISTS drivers ADD COLUMN IF NOT EXISTS user_id INTEGER NULL;'))
     conn.execute(text('CREATE INDEX IF NOT EXISTS ix_drivers_user_id ON drivers (user_id);'))
+    conn.execute(text('ALTER TABLE IF EXISTS drivers ADD COLUMN IF NOT EXISTS last_location_trip_id INTEGER NULL;'))
+    conn.execute(
+        text('CREATE INDEX IF NOT EXISTS ix_drivers_last_location_trip_id ON drivers (last_location_trip_id);')
+    )
     # Enforce one driver profile per user (nullable; multiple NULLs allowed).
     conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_drivers_user_id ON drivers (user_id);"))
     conn.execute(text('ALTER TABLE IF EXISTS users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE;'))
@@ -373,6 +457,12 @@ with engine.begin() as conn:
     conn.execute(text('ALTER TABLE IF EXISTS trips ADD COLUMN IF NOT EXISTS tracking_token VARCHAR NULL;'))
     conn.execute(text('CREATE UNIQUE INDEX IF NOT EXISTS ix_trips_tracking_token ON trips (tracking_token);'))
     conn.execute(text('ALTER TABLE IF EXISTS trips ADD COLUMN IF NOT EXISTS eta TIMESTAMP NULL;'))
+    conn.execute(text("ALTER TABLE IF EXISTS trips ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMP NULL;"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trips_scheduled_at ON trips (scheduled_at);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trips_status ON trips (status);"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trips_completed_at ON trips (completed_at);"))
+    conn.execute(text('ALTER TABLE IF EXISTS tours ADD COLUMN IF NOT EXISTS company_id INTEGER NULL;'))
+    conn.execute(text('CREATE INDEX IF NOT EXISTS ix_tours_company_id ON tours (company_id);'))
     # Trip service metrics (no Alembic: bootstrap missing columns/types)
     conn.execute(text('ALTER TABLE IF EXISTS trips ADD COLUMN IF NOT EXISTS start_km DOUBLE PRECISION NULL;'))
     conn.execute(text('ALTER TABLE IF EXISTS trips ADD COLUMN IF NOT EXISTS end_km DOUBLE PRECISION NULL;'))
@@ -394,6 +484,12 @@ with engine.begin() as conn:
     conn.execute(text("ALTER TABLE IF EXISTS trips ADD COLUMN IF NOT EXISTS bnb_commission DOUBLE PRECISION NULL;"))
     conn.execute(text("ALTER TABLE IF EXISTS trips ADD COLUMN IF NOT EXISTS platform_commission DOUBLE PRECISION NULL;"))
     conn.execute(text("ALTER TABLE IF EXISTS trips ADD COLUMN IF NOT EXISTS driver_amount DOUBLE PRECISION NULL;"))
+    conn.execute(
+        text(
+            "ALTER TABLE IF EXISTS trips ADD COLUMN IF NOT EXISTS assigned_driver_id INTEGER NULL REFERENCES drivers(id);"
+        )
+    )
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_trips_assigned_driver_id ON trips (assigned_driver_id);"))
     conn.execute(
         text(
             "ALTER TABLE IF EXISTS trips ADD COLUMN IF NOT EXISTS has_bnb BOOLEAN NOT NULL DEFAULT FALSE;"
@@ -442,6 +538,13 @@ with engine.begin() as conn:
         )
     )
     conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_providers_referral_code ON providers (referral_code);"))
+    conn.execute(text("ALTER TABLE IF EXISTS providers ADD COLUMN IF NOT EXISTS public_slug VARCHAR NULL;"))
+    conn.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_providers_public_slug ON providers (public_slug) "
+            "WHERE public_slug IS NOT NULL AND TRIM(public_slug) <> '';"
+        )
+    )
     conn.execute(
         text(
             """
@@ -826,11 +929,8 @@ with engine.begin() as conn:
         )
     )
 
-    if locked:
-        try:
-            conn.execute(text("SELECT pg_advisory_unlock(987654321);"))
-        except Exception:
-            pass
+
+_ensure_pg_trip_status_expired_enum()
 
 
 def _bootstrap_admin_if_configured() -> None:
@@ -866,17 +966,23 @@ def _bootstrap_admin_if_configured() -> None:
 
 _bootstrap_admin_if_configured()
 
+app.include_router(bnb_register_router)
+app.include_router(referral_tracking_router, prefix="/api")
+app.include_router(checkout_public_router, prefix="/api")
+
 app.include_router(auth_router, prefix="/api")
 app.include_router(portal_login_router, prefix="/api")
 app.include_router(admin_dashboard_router, prefix="/api")
 # B&B dashboard router: mount at ``/api/bnb`` (routes in the module are paths like ``/upload-logo``, ``/partner/me`` — no extra ``/bnb`` segment on the router).
 app.include_router(bnb_dashboard_router, prefix="/api/bnb")
 app.include_router(bookings_router, prefix="/api")
+app.include_router(admin_bookings_router, prefix="/api")
 app.include_router(booking_checkout_router, prefix="/api")
 app.include_router(quotes_router, prefix="/api")
 app.include_router(tours_router, prefix="/api")
 app.include_router(public_tour_instances_router, prefix="/api")
 app.include_router(driver_dashboard_router, prefix="/api")
+app.include_router(driver_stripe_router, prefix="/api")
 app.include_router(drivers_router, prefix="/api")
 app.include_router(flights_router, prefix="/api")
 app.include_router(vehicles_router, prefix="/api")

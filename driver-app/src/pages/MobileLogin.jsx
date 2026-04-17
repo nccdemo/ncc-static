@@ -33,12 +33,12 @@ export default function MobileLogin() {
     if (consumeHashJwt()) {
       const role = String(parseJwtPayload(getToken())?.role || '').toLowerCase()
       if (role === 'driver') {
-        navigate('/today', { replace: true })
+        navigate('/driver/today', { replace: true })
         return
       }
     }
     if (readDriverSession()) {
-      navigate('/today', { replace: true })
+      navigate('/driver/today', { replace: true })
     }
   }, [navigate])
 
@@ -66,7 +66,7 @@ export default function MobileLogin() {
         data = r.data
       }
       setToken(data.access_token)
-      navigate('/today', { replace: true })
+      navigate('/driver/today', { replace: true })
     } catch (err) {
       const detail = err?.response?.data?.detail
       setError(formatApiDetail(detail) || 'Accesso non riuscito')

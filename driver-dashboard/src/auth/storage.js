@@ -2,7 +2,8 @@
 export const TOKEN_KEY = 'ncc_partner_access_token'
 export const ROLE_KEY = 'ncc_partner_role'
 
-export const LOGIN_URL = import.meta.env.VITE_LOGIN_URL || '/login'
+// Default login entry for this app is "/".
+export const LOGIN_URL = import.meta.env.VITE_LOGIN_URL || '/'
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY)
@@ -70,5 +71,5 @@ export function jwtRoleIsDriver(token) {
 
 export function redirectToLogin() {
   clearSession()
-  window.location.href = '/login'
+  window.location.href = LOGIN_URL
 }

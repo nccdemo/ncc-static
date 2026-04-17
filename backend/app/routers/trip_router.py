@@ -1,13 +1,14 @@
 from datetime import date as Date, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.deps.auth import (
+    get_actor_context,
     require_admin,
     require_admin_or_driver_self,
     require_driver,
@@ -38,6 +39,31 @@ class TripResponse(BaseModel):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     notes: str | None = None
+
+
+class TripAdminListRow(BaseModel):
+    """Admin trip table row (list + driver display name)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    status: TripStatus
+    driver_id: int | None = None
+    driver_name: str | None = None
+    vehicle_id: int | None = None
+    service_date: Date | None = None
+    tour_instance_id: int | None = None
+
+
+class TripDispatchCreateRequest(BaseModel):
+    """Body for ``POST /api/trips`` manual transfer (customer + route + time, no driver yet)."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, populate_by_name=True)
+
+    customer_name: str = Field(min_length=1)
+    pickup: str = Field(min_length=1)
+    dropoff: str = Field(min_length=1)
+    ride_datetime: datetime = Field(..., alias="datetime")
 
 
 class TripCreateRequest(BaseModel):
@@ -106,12 +132,51 @@ def _get_trip_or_404(db: Session, trip_id: int) -> Trip:
     return trip
 
 
+@router.get("/", response_model=list[TripAdminListRow])
+def list_trips(
+    db: Session = Depends(get_db),
+    actor: dict = Depends(get_actor_context),
+    limit: int = Query(500, ge=1, le=2000, description="Max rows (newest first)."),
+) -> list[TripAdminListRow]:
+    """Trips list (admin: all, company: scoped)."""
+    q = db.query(Trip).options(joinedload(Trip.driver)).order_by(Trip.id.desc()).limit(int(limit))
+    if actor["role"] != "admin":
+        q = q.filter(Trip.company_id == int(actor["company_id"]))
+    trips = q.all()
+    out: list[TripAdminListRow] = []
+    for t in trips:
+        dname = None
+        if t.driver is not None:
+            dname = str(getattr(t.driver, "name", "") or "").strip() or None
+        out.append(
+            TripAdminListRow(
+                id=int(t.id),
+                status=t.status,
+                driver_id=t.driver_id,
+                driver_name=dname,
+                vehicle_id=t.vehicle_id,
+                service_date=t.service_date,
+                tour_instance_id=t.tour_instance_id,
+            )
+        )
+    return out
+
+
 @router.post("/", response_model=TripResponse, status_code=status.HTTP_201_CREATED)
 def create_trip(
-    payload: TripCreateRequest,
+    payload: TripDispatchCreateRequest | TripCreateRequest,
     db: Session = Depends(get_db),
     _admin: dict = Depends(require_admin),
 ) -> Trip:
+    if isinstance(payload, TripDispatchCreateRequest):
+        return TripService.create_dispatch_transfer_trip(
+            db,
+            customer_name=payload.customer_name,
+            pickup=payload.pickup,
+            dropoff=payload.dropoff,
+            ride_at=payload.ride_datetime,
+        )
+
     driver = db.query(Driver).filter(Driver.id == payload.driver_id).first()
     if driver is None:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -126,11 +191,14 @@ def create_trip(
 
     now = datetime.utcnow()
     print("CREATING TRIP WITH STATUS:", TripStatus.SCHEDULED)
+    sched = datetime.combine(payload.date, datetime.min.time())
     trip = Trip(
+        company_id=getattr(driver, "company_id", None),
         tour_instance_id=payload.tour_instance_id,
         driver_id=payload.driver_id,
         vehicle_id=payload.vehicle_id,
         service_date=payload.date,
+        scheduled_at=sched,
         status=TripStatus.SCHEDULED,
         assigned_at=now,
         last_assigned_at=now,
@@ -221,16 +289,18 @@ _TRIP_ACTIVE_FOR_INSTANCES: tuple[TripStatus, ...] = (
 @router.get("/active")
 def list_active_trips_simple(
     db: Session = Depends(get_db),
-    _admin: dict = Depends(require_admin),
+    actor: dict = Depends(get_actor_context),
 ) -> list[dict[str, Any]]:
     """Lightweight active trips for admin Instances page (must be registered before /{trip_id})."""
-    trips = (
+    q = (
         db.query(Trip)
         .options(joinedload(Trip.booking))
         .filter(Trip.status.in_(_TRIP_ACTIVE_FOR_INSTANCES))
         .order_by(Trip.id.desc())
-        .all()
     )
+    if actor["role"] != "admin":
+        q = q.filter(Trip.company_id == int(actor["company_id"]))
+    trips = q.all()
     out: list[dict[str, Any]] = []
     for t in trips:
         st = t.status.value.lower() if hasattr(t.status, "value") else str(t.status).lower()
@@ -301,7 +371,10 @@ def list_available_marketplace_trips(
     trips = (
         db.query(Trip)
         .options(joinedload(Trip.booking))
-        .filter(Trip.driver_id.is_(None))
+        .filter(
+            Trip.driver_id.is_(None),
+            Trip.status.in_((TripStatus.SCHEDULED, TripStatus.PENDING)),
+        )
         .order_by(Trip.id.desc())
         .all()
     )
@@ -386,6 +459,17 @@ def assign_trip(
         driver_id=payload.driver_id,
         vehicle_id=payload.vehicle_id,
     )
+
+
+@router.post("/{trip_id}/cancel", response_model=TripResponse)
+def admin_cancel_trip_endpoint(
+    trip_id: int,
+    db: Session = Depends(get_db),
+    _admin: dict = Depends(require_admin),
+) -> Trip:
+    """Admin: set trip to ``CANCELLED`` and release driver/vehicle."""
+    trip = _get_trip_or_404(db, trip_id)
+    return TripService.admin_cancel_trip(db=db, trip=trip)
 
 
 @router.post("/{trip_id}/accept", response_model=TripResponse)

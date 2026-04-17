@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import {
-  API_ORIGIN,
   BNB_UPLOAD_COVER_URL,
   BNB_UPLOAD_LOGO_URL,
   getBnbPartnerMe,
   getBnbPartnerSummary,
   updateBnbMe,
 } from '../api/client.js'
+import { apiUrl, brandingPathForApi } from '../api/apiUrl.js'
 import { getToken, redirectToLogin, referralLinkForCode } from '../auth/storage.js'
 
 function formatMoney(n) {
@@ -17,20 +17,14 @@ function formatMoney(n) {
   }).format(Number(n) || 0)
 }
 
-function resolveAssetUrl(pathOrUrl) {
-  if (pathOrUrl == null || typeof pathOrUrl !== 'string') return null
-  const s = pathOrUrl.trim()
-  if (!s) return null
-  if (s.startsWith('http://') || s.startsWith('https://')) return s
-  return `${API_BASE}${s.startsWith('/') ? s : `/${s}`}`
-}
-
 export default function BnbDashboard() {
   const [summary, setSummary] = useState(null)
   const [err, setErr] = useState('')
 
-  const [logoUrl, setLogoUrl] = useState(null)
-  const [coverUrl, setCoverUrl] = useState(null)
+  /** Stored paths only (e.g. ``/uploads/bnb/...``) for API + display via ``apiUrl``. */
+  const [logoPath, setLogoPath] = useState(null)
+  const [coverPath, setCoverPath] = useState(null)
+  const [mediaRev, setMediaRev] = useState(0)
   const [name, setName] = useState('')
   const [brandSaving, setBrandSaving] = useState(false)
   const [brandErr, setBrandErr] = useState('')
@@ -39,8 +33,8 @@ export default function BnbDashboard() {
     const me = await getBnbPartnerMe()
     const display = me?.display_name != null ? String(me.display_name).trim() : ''
     setName(display)
-    setLogoUrl(resolveAssetUrl(me?.logo_url))
-    setCoverUrl(resolveAssetUrl(me?.cover_image_url))
+    setLogoPath(brandingPathForApi(me?.logo_url))
+    setCoverPath(brandingPathForApi(me?.cover_image_url))
   }, [])
 
   useEffect(() => {
@@ -72,7 +66,6 @@ export default function BnbDashboard() {
     if (token) {
       headers.Authorization = `Bearer ${token}`
     }
-    // Do not set Content-Type — required for multipart/form-data boundary.
     const res = await fetch(BNB_UPLOAD_LOGO_URL, {
       method: 'POST',
       body: formData,
@@ -90,11 +83,14 @@ export default function BnbDashboard() {
       return
     }
 
-    const path = String(data.logo_url).trim().startsWith('/')
-      ? String(data.logo_url).trim()
-      : `/${String(data.logo_url).trim()}`
-    setLogoUrl(`${API_ORIGIN}${path}`)
+    setLogoPath(brandingPathForApi(data.logo_url))
     setBrandErr('')
+    setMediaRev((n) => n + 1)
+    try {
+      await loadProfile()
+    } catch {
+      /* stato locale già aggiornato */
+    }
   }
 
   async function handleCoverUpload(e) {
@@ -110,7 +106,6 @@ export default function BnbDashboard() {
     if (token) {
       headers.Authorization = `Bearer ${token}`
     }
-    // Do not set Content-Type — required for multipart/form-data boundary.
     const res = await fetch(BNB_UPLOAD_COVER_URL, {
       method: 'POST',
       body: formData,
@@ -128,26 +123,26 @@ export default function BnbDashboard() {
       return
     }
 
-    const path = String(data.cover_url).trim().startsWith('/')
-      ? String(data.cover_url).trim()
-      : `/${String(data.cover_url).trim()}`
-    setCoverUrl(`${API_ORIGIN}${path}`)
+    setCoverPath(brandingPathForApi(data.cover_url))
     setBrandErr('')
+    setMediaRev((n) => n + 1)
+    try {
+      await loadProfile()
+    } catch {
+      /* stato locale già aggiornato */
+    }
   }
 
   async function saveBranding() {
     setBrandErr('')
     setBrandSaving(true)
     try {
-      const logoForApi =
-        logoUrl && logoUrl.startsWith(API_ORIGIN) ? logoUrl.slice(API_ORIGIN.length) || null : logoUrl
-      const coverForApi =
-        coverUrl && coverUrl.startsWith(API_ORIGIN) ? coverUrl.slice(API_ORIGIN.length) || null : coverUrl
       await updateBnbMe({
         display_name: name.trim() || null,
-        logo_url: logoForApi || null,
-        cover_image_url: coverForApi || null,
+        logo_url: logoPath,
+        cover_image_url: coverPath,
       })
+      setMediaRev((n) => n + 1)
       await loadProfile()
     } catch (e) {
       setBrandErr(e?.message || 'Salvataggio non riuscito.')
@@ -158,6 +153,9 @@ export default function BnbDashboard() {
 
   const code = summary?.referral_code || ''
   const link = referralLinkForCode(code)
+
+  const logoSrc = logoPath ? `${apiUrl(logoPath)}?r=${mediaRev}` : ''
+  const coverSrc = coverPath ? `${apiUrl(coverPath)}?r=${mediaRev}` : ''
 
   return (
     <div>
@@ -189,8 +187,12 @@ export default function BnbDashboard() {
           <input id="bnb-brand-logo" type="file" accept="image/jpeg,image/png,image/webp" onChange={handleLogoUpload} />
         </div>
 
-        {logoUrl ? (
-          <img src={logoUrl} alt="" style={{ width: 120, marginTop: 10, display: 'block', objectFit: 'contain' }} />
+        {logoSrc ? (
+          <img
+            src={logoSrc}
+            alt=""
+            style={{ width: '120px', height: 'auto', marginTop: 10, display: 'block', objectFit: 'contain' }}
+          />
         ) : null}
 
         <div className="field" style={{ marginTop: 16 }}>
@@ -203,8 +205,20 @@ export default function BnbDashboard() {
           />
         </div>
 
-        {coverUrl ? (
-          <img src={coverUrl} alt="" style={{ width: 200, marginTop: 10, display: 'block', objectFit: 'cover', borderRadius: 8 }} />
+        {coverSrc ? (
+          <img
+            src={coverSrc}
+            alt=""
+            style={{
+              width: '100%',
+              maxWidth: 640,
+              height: '250px',
+              marginTop: 10,
+              display: 'block',
+              objectFit: 'cover',
+              borderRadius: 8,
+            }}
+          />
         ) : null}
 
         <div className="btn-row" style={{ marginTop: 16 }}>

@@ -21,6 +21,8 @@ class Driver(Base):
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
     last_location_update = Column(DateTime, nullable=True)
+    # Optional context for the last GPS sample (active / recent trip).
+    last_location_trip_id = Column(Integer, ForeignKey("trips.id", ondelete="SET NULL"), nullable=True, index=True)
 
     # Default vehicle for this driver (trips copy this when the driver is assigned).
     vehicle_id = Column(Integer, ForeignKey("vehicles.id"), nullable=True, index=True)
@@ -39,4 +41,8 @@ class Driver(Base):
     vehicle = relationship("Vehicle", foreign_keys=[vehicle_id])
     # Vehicles created during driver self-registration (one-to-many; primary is `vehicle_id` above).
     vehicles = relationship("Vehicle", foreign_keys="Vehicle.driver_id", back_populates="driver")
-    trips = relationship("Trip", back_populates="driver")
+    trips = relationship(
+        "Trip",
+        back_populates="driver",
+        foreign_keys="Trip.driver_id",
+    )

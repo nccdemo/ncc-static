@@ -173,7 +173,7 @@ def create_ride_payment_intent(
             acct = getattr(driver, "stripe_account_id", None)
             if acct and str(acct).strip():
                 connect_account = str(acct).strip()
-                fee_rate = float(getattr(trip, "commission_rate", 0.2) or 0.2)
+                fee_rate = float(getattr(trip, "commission_rate", 0.15) or 0.15)
 
     try:
         return create_ride_payment_intent(
@@ -186,7 +186,8 @@ def create_ride_payment_intent(
             platform_fee_rate=fee_rate,
         )
     except CheckoutSessionCreationError as e:
-        raise HTTPException(status_code=503, detail=getattr(e, "message", str(e))) from e
+        code = int(getattr(e, "status_code", None) or 503)
+        raise HTTPException(status_code=code, detail=getattr(e, "message", str(e))) from e
 
 
 class ConfirmStripePaymentBody(BaseModel):

@@ -7,9 +7,10 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.deps.auth import require_admin
+from app.deps.auth import require_admin, require_admin_or_driver_self
 from app.models.booking import Booking
 from app.models.driver import Driver
+from app.models.driver_payout import DriverPayout
 from app.models.driver_wallet import DriverWallet, DriverWalletTransaction
 from app.models.payment import Payment
 from app.models.trip import Trip, TripStatus
@@ -18,7 +19,6 @@ from app.services.ride_commission import resolve_payment_split
 router = APIRouter(
     prefix="/drivers",
     tags=["driver-wallet"],
-    dependencies=[Depends(require_admin)],
 )
 
 
@@ -67,7 +67,11 @@ def _driver_earnings_aggregate(
 
 
 @router.get("/{driver_id}/report")
-def get_driver_financial_report(driver_id: int, db: Session = Depends(get_db)) -> dict:
+def get_driver_financial_report(
+    driver_id: int,
+    db: Session = Depends(get_db),
+    _auth: dict = Depends(require_admin_or_driver_self),
+) -> dict:
     driver = db.query(Driver).filter(Driver.id == int(driver_id)).first()
     if driver is None:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -100,7 +104,11 @@ def get_driver_financial_report(driver_id: int, db: Session = Depends(get_db)) -
 
 
 @router.get("/{driver_id}/wallet")
-def get_driver_wallet(driver_id: int, db: Session = Depends(get_db)) -> dict:
+def get_driver_wallet(
+    driver_id: int,
+    db: Session = Depends(get_db),
+    _auth: dict = Depends(require_admin_or_driver_self),
+) -> dict:
     driver = db.query(Driver).filter(Driver.id == int(driver_id)).first()
     if driver is None:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -119,8 +127,31 @@ def get_driver_wallet(driver_id: int, db: Session = Depends(get_db)) -> dict:
         .all()
     )
 
+    _, _, driver_net = _driver_earnings_aggregate(db, driver_id, since=None)
+    trips_count = (
+        db.query(func.count(Trip.id))
+        .filter(Trip.driver_id == int(driver_id), Trip.status == TripStatus.COMPLETED)
+        .scalar()
+        or 0
+    )
+    payout_rows = [
+        p
+        for p in (
+            db.query(DriverPayout)
+            .filter(DriverPayout.driver_id == int(driver_id))
+            .all()
+        )
+        if str(getattr(p, "status", None) or "").strip().lower() == "pending"
+    ]
+    pending_payouts_amount = round(sum(float(p.amount or 0.0) for p in payout_rows), 2)
+    pending_payouts_count = len(payout_rows)
+
     return {
         "balance": float(getattr(wallet, "balance", 0.0) or 0.0),
+        "total_earnings": round(float(driver_net), 2),
+        "trips_count": int(trips_count),
+        "pending_payouts": pending_payouts_amount,
+        "pending_payouts_count": int(pending_payouts_count),
         "transactions": [
             {
                 "id": int(t.id),
@@ -136,7 +167,12 @@ def get_driver_wallet(driver_id: int, db: Session = Depends(get_db)) -> dict:
 
 
 @router.post("/{driver_id}/settle-wallet")
-def settle_wallet(driver_id: int, payload: SettleWalletBody, db: Session = Depends(get_db)) -> dict:
+def settle_wallet(
+    driver_id: int,
+    payload: SettleWalletBody,
+    db: Session = Depends(get_db),
+    _admin: dict = Depends(require_admin),
+) -> dict:
     driver = db.query(Driver).filter(Driver.id == int(driver_id)).first()
     if driver is None:
         raise HTTPException(status_code=404, detail="Driver not found")
@@ -179,6 +215,7 @@ def driver_payout(
     driver_id: int,
     payload: PayoutBody,
     db: Session = Depends(get_db),
+    _admin: dict = Depends(require_admin),
 ) -> dict:
     """
     Record a payout to the driver: reduces wallet balance (money they owed from cash collected).

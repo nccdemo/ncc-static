@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import axios from '../api/axios'
+import { getStoredReferralCode, persistReferralFromUrlSearch } from '../utils/referralStorage'
 
 function formatTourDate(iso) {
   if (iso == null || iso === '') return '—'
@@ -39,6 +40,21 @@ export default function Tours() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const canceled = searchParams.get('canceled') === '1'
+  const tourIdFilterRaw = searchParams.get('tour_id')
+  const tourIdFilter = useMemo(() => {
+    const n = parseInt(String(tourIdFilterRaw || ''), 10)
+    return Number.isFinite(n) && n > 0 ? n : null
+  }, [tourIdFilterRaw])
+
+  const visibleItems = useMemo(() => {
+    if (tourIdFilter == null) return items
+    return items.filter((row) => Number(row.tour_id) === tourIdFilter)
+  }, [items, tourIdFilter])
+
+  useEffect(() => {
+    const raw = searchParams.toString()
+    persistReferralFromUrlSearch(raw ? `?${raw}` : '')
+  }, [searchParams])
 
   useEffect(() => {
     let cancelled = false
@@ -60,6 +76,7 @@ export default function Tours() {
   }, [])
 
   function goCheckout(row) {
+    const referral_code = getStoredReferralCode()
     navigate('/checkout', {
       state: {
         tour: {
@@ -71,6 +88,7 @@ export default function Tours() {
         date: row.date,
         tour_instance_id: row.id,
         max_people: row.available_seats,
+        ...(referral_code ? { referral_code } : {}),
       },
     })
   }
@@ -100,8 +118,21 @@ export default function Tours() {
         <p>Nessuna data disponibile al momento.</p>
       ) : null}
 
+      {tourIdFilter != null && !loading && !err ? (
+        <p className="landing-muted" style={{ marginBottom: '1rem', textAlign: 'left' }}>
+          Date per questo tour. <Link to="/tours">Mostra tutte le partenze</Link>
+        </p>
+      ) : null}
+
+      {!loading && !err && tourIdFilter != null && items.length > 0 && visibleItems.length === 0 ? (
+        <p className="banner-warn" role="status">
+          Nessuna partenza con posti liberi per questo tour.{' '}
+          <Link to="/tours">Vedi tutte le date</Link>
+        </p>
+      ) : null}
+
       <ul className="instance-list">
-        {items.map((row) => (
+        {visibleItems.map((row) => (
           <li key={row.id} className="instance-card">
             <div className="instance-card-body">
               <h2 className="instance-title">{row.tour_title}</h2>
@@ -128,7 +159,7 @@ export default function Tours() {
       </ul>
 
       <p style={{ marginTop: '2rem' }}>
-        <Link to="/">← Home</Link>
+        <Link to="/explore">← Home</Link>
       </p>
     </div>
   )

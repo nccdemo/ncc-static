@@ -1,23 +1,39 @@
 import { useCallback, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Banknote, Briefcase, CalendarDays, CreditCard, LogOut, Menu, Wallet, X } from 'lucide-react'
+import {
+  Briefcase,
+  CalendarDays,
+  ClipboardList,
+  History as HistoryIcon,
+  LogOut,
+  Menu,
+  Wallet,
+  Banknote,
+  CalendarClock,
+  CreditCard,
+  X,
+} from 'lucide-react'
 
+import DriverLocationReporter from '../components/DriverLocationReporter.jsx'
 import { clearDriverSession } from '../lib/api'
 
 import './DriverLayout.css'
 
 const nav = [
-  { to: 'work', label: 'Work', icon: Briefcase, end: true },
-  { to: 'earnings', label: 'Earnings', icon: Banknote },
+  { to: 'today', label: 'Lavoro', icon: Briefcase, end: true },
+  { to: 'today-trips', label: 'Transfer oggi', icon: ClipboardList },
+  { to: 'tours-today', label: 'Tour oggi', icon: CalendarDays },
+  { to: 'history', label: 'Storico', icon: HistoryIcon },
   { to: 'wallet', label: 'Wallet', icon: Wallet },
-  { to: 'payments', label: 'Payments', icon: CreditCard },
-  { to: 'schedule', label: 'Schedule', icon: CalendarDays },
+  { to: 'earnings', label: 'Guadagni', icon: Banknote },
+  { to: 'schedule', label: 'Programma', icon: CalendarClock },
+  { to: 'payments', label: 'Pagamenti', icon: CreditCard },
 ]
 
 /**
  * @param {{ loginPath?: string }} props
  */
-export default function DriverLayout({ loginPath = '/' }) {
+export default function DriverLayout({ loginPath = '/login' }) {
   const navigate = useNavigate()
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
@@ -78,6 +94,7 @@ export default function DriverLayout({ loginPath = '/' }) {
       </aside>
 
       <div className="driver-shell-main">
+        <DriverLocationReporter />
         <Outlet key={location.pathname} />
       </div>
     </div>

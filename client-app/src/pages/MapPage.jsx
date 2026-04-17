@@ -6,7 +6,7 @@ export default function MapPage() {
     <div className="map-page">
       <nav className="map-page-nav">
         <Link to="/tours">← Tour</Link>
-        <Link to="/">Home</Link>
+        <Link to="/explore">Home</Link>
       </nav>
       <ClientMap />
     </div>

@@ -201,6 +201,41 @@ def get_current_role(required_roles: list[str]) -> Callable[..., User]:
     return _dep
 
 
+def resolve_driver_for_user(db: Session, user: User) -> Driver | None:
+    uid = getattr(user, "id", None)
+    if uid is None:
+        return None
+    return db.query(Driver).filter(Driver.user_id == int(uid)).first()
+
+
+def get_actor_context(
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[User, Depends(get_current_active_user)],
+) -> dict:
+    """
+    Multi-tenant actor context.
+
+    - admin: full access (company_id = None)
+    - driver: company-scoped access (company_id required)
+    """
+    role = (getattr(user, "role", None) or "").strip().lower()
+    if role == "admin":
+        return {"role": "admin", "user": user, "company_id": None, "driver": None}
+
+    if role != "driver":
+        raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail="Insufficient permissions")
+
+    driver = resolve_driver_for_user(db, user)
+    if driver is None:
+        raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail="Driver profile not found")
+
+    cid = getattr(driver, "company_id", None)
+    if cid is None:
+        raise HTTPException(status_code=HTTP_403_FORBIDDEN, detail="Company context missing")
+
+    return {"role": "driver", "user": user, "company_id": int(cid), "driver": driver}
+
+
 def require_admin(payload: Annotated[dict, Depends(auth_payload)]) -> dict:
     if payload.get("role") != "admin":
         raise HTTPException(

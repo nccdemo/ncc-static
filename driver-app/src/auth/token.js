@@ -1,5 +1,7 @@
-/** Partner onboarding uses this key; legacy driver app used `token`. */
-const KEYS = ['ncc_partner_access_token', 'token']
+/**
+ * Token lookup order: some builds use ``driver_session``; partner onboarding and legacy use the others.
+ */
+const KEYS = ['driver_session', 'ncc_partner_access_token', 'token']
 
 /** App-local login path (driver app on 5174). */
 export const PARTNER_LOGIN_URL = import.meta.env.VITE_PARTNER_LOGIN_URL || '/login'
@@ -66,6 +68,7 @@ export function getToken() {
 }
 
 export function setToken(accessToken) {
+  localStorage.setItem('driver_session', accessToken)
   localStorage.setItem('ncc_partner_access_token', accessToken)
   localStorage.setItem('token', accessToken)
 }

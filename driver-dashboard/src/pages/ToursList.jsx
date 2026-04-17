@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { getMyTours } from '../api/client.js'
+import { getTours } from '../services/tours.js'
 
 export default function ToursList() {
   const [tours, setTours] = useState([])
@@ -10,8 +10,8 @@ export default function ToursList() {
     let cancelled = false
     ;(async () => {
       try {
-        const data = await getMyTours()
-        if (!cancelled) setTours(data)
+        const data = await getTours()
+        if (!cancelled) setTours(Array.isArray(data) ? data : [])
       } catch (e) {
         if (!cancelled) setErr(e.message || 'Errore')
       }

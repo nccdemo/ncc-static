@@ -1,7 +1,8 @@
 import { getToken, redirectToLogin } from '../auth/storage.js'
 
-/** Backend origin for absolute API URLs (uploads must not use site-relative ``/api`` only). */
-export const API_ORIGIN = (import.meta.env.VITE_API_ORIGIN || 'http://localhost:8000').replace(/\/$/, '')
+import { API_ORIGIN } from './apiUrl.js'
+
+export { API_ORIGIN }
 
 export const BNB_UPLOAD_LOGO_URL = `${API_ORIGIN}/api/bnb/upload-logo`
 export const BNB_UPLOAD_COVER_URL = `${API_ORIGIN}/api/bnb/upload-cover`

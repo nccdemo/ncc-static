@@ -15,6 +15,14 @@ router = APIRouter(tags=["WebSockets"])
 
 @router.websocket("/ws/trips")
 async def ws_trips(websocket: WebSocket):
+    """
+    Dispatch / ops clients subscribe here for trip lifecycle and **live driver GPS**.
+
+    Driver apps send coordinates via ``POST /api/driver/location`` (or legacy drivers
+    location endpoints); the server pushes JSON to this channel, including::
+
+        {"event": "driver_location_update", "driver_id": <int>, "lat": <float>, "lng": <float>}
+    """
     await manager.connect(websocket)
     try:
         while True:

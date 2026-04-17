@@ -98,6 +98,33 @@ class ConnectionManager:
             return
         loop.create_task(self.broadcast(message))
 
+    def broadcast_driver_location_sync(
+        self,
+        driver_id: int,
+        lat: float,
+        lng: float,
+        *,
+        timestamp: str | None = None,
+        trip_id: int | None = None,
+    ) -> None:
+        """
+        Live driver GPS for all clients on ``/ws/trips``.
+
+        Core fields (always present): ``driver_id``, ``lat``, ``lng``.
+        ``event`` is set for existing dispatch UIs; optional ``timestamp`` / ``trip_id`` when known.
+        """
+        msg: dict[str, Any] = {
+            "event": "driver_location_update",
+            "driver_id": int(driver_id),
+            "lat": float(lat),
+            "lng": float(lng),
+        }
+        if timestamp is not None:
+            msg["timestamp"] = timestamp
+        if trip_id is not None:
+            msg["trip_id"] = int(trip_id)
+        self.broadcast_sync(msg)
+
     def broadcast_drivers_sync(self, message: Any) -> None:
         try:
             loop = asyncio.get_running_loop()

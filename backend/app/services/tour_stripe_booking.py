@@ -82,14 +82,17 @@ def resolve_driver_id_for_tour_booking(db: Session, instance: TourInstance, meta
 
 
 def parse_seats_from_tour_checkout_metadata(md: dict) -> int | None:
-    raw = md.get("seats") if md.get("seats") not in (None, "") else md.get("passengers")
-    if raw is None or str(raw).strip() == "":
-        return None
-    try:
-        n = int(raw)
-        return n if n > 0 else None
-    except (TypeError, ValueError):
-        return None
+    """Prefer ``people`` (tour page / unified metadata), then ``seats`` / ``passengers``."""
+    for key in ("people", "seats", "passengers"):
+        raw = md.get(key)
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            n = int(raw)
+            return n if n > 0 else None
+        except (TypeError, ValueError):
+            continue
+    return None
 
 
 def create_tour_booking_checkout(
@@ -156,10 +159,13 @@ def create_tour_booking_checkout(
     ref_for_stripe, bnb_for_checkout = resolve_valid_bnb_referral(db, raw_ref)
     has_bnb_checkout = bool(bnb_for_checkout)
 
-    driver_id_snap = instance.driver_id
+    # Same driver resolution as webhook (resolve_driver_id_for_tour_booking without metadata override):
+    # instance.driver_id, else first assigned_driver_ids — keeps Connect destination aligned with trips.
+    resolved_driver_id, _ = TripService._driver_vehicle_from_tour_instance(db, instance)
+    driver_id_snap = resolved_driver_id
     driver_row: Driver | None = None
     if driver_id_snap is not None:
-        driver_row = db.query(Driver).filter(Driver.id == driver_id_snap).first()
+        driver_row = db.query(Driver).filter(Driver.id == int(driver_id_snap)).first()
     connect_dest = (getattr(driver_row, "stripe_account_id", None) or "").strip() if driver_row else ""
 
     tour_id_snap = int(tour.id)

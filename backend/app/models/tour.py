@@ -15,6 +15,7 @@ class Tour(Base):
     __tablename__ = "tours"
 
     id = Column(Integer, primary_key=True, index=True)
+    company_id = Column(Integer, ForeignKey("companies.id"), nullable=True, index=True)
     owner_driver_id = Column(Integer, ForeignKey("drivers.id", ondelete="SET NULL"), nullable=True, index=True)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
@@ -23,7 +24,8 @@ class Tour(Base):
     duration = Column(Integer, nullable=True)
     capacity = Column(Integer, nullable=False, default=7)
     occupied_seats = Column(Integer, nullable=False, default=0)
-    images = Column(JSON, nullable=False, default=list)
+    # JSON array of relative URL strings, e.g. ``["/uploads/tours/abc.jpg"]`` (max 5 enforced on upload).
+    images = Column(JSON, nullable=False, default=lambda: [])
     type = Column(String, nullable=False, default="tour")
     active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=True, server_default=func.now())

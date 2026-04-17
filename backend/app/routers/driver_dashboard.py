@@ -3,7 +3,7 @@
 from datetime import date as Date
 from datetime import datetime, time as Time
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -25,6 +25,7 @@ from app.routers.tour_instances import (
 )
 from app.schemas.booking import BookingResponse
 from app.schemas.tour import TourResponse
+from app.services.tour_image_upload import append_tour_images_from_upload_files
 from app.schemas.tour_instance import TourInstanceResponse
 
 router = APIRouter(prefix="/driver", tags=["driver-dashboard"])
@@ -34,6 +35,7 @@ class DriverTourCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     description: str | None = Field(None, max_length=20000)
     base_price: float = Field(..., gt=0)
+    city: str | None = Field(None, max_length=200, description="Location / area shown to guests")
 
 
 class DriverInstanceCreate(BaseModel):
@@ -96,10 +98,34 @@ def list_my_tours(
     did = _driver_id_from_auth(auth)
     return (
         db.query(Tour)
-        .filter(Tour.owner_driver_id == did, Tour.active.is_(True))
+        .filter(Tour.owner_driver_id == did)
         .order_by(Tour.id.desc())
         .all()
     )
+
+
+@router.get("/tours/{tour_id}", response_model=TourResponse)
+def get_my_tour(
+    tour_id: int,
+    db: Session = Depends(get_db),
+    auth: dict = Depends(require_driver),
+) -> Tour:
+    did = _driver_id_from_auth(auth)
+    return _get_owned_tour_or_404(db, tour_id, did)
+
+
+@router.post("/tours/{tour_id}/upload-image")
+async def upload_my_tour_image(
+    tour_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    auth: dict = Depends(require_driver),
+) -> dict:
+    did = _driver_id_from_auth(auth)
+    tour = _get_owned_tour_or_404(db, tour_id, did)
+    form = await request.form()
+    upload_files = [x for x in form.getlist("file") if isinstance(x, UploadFile)]
+    return append_tour_images_from_upload_files(db, tour, upload_files)
 
 
 @router.post("/tours", response_model=TourResponse, status_code=status.HTTP_201_CREATED)
@@ -109,10 +135,12 @@ def create_my_tour(
     auth: dict = Depends(require_driver),
 ) -> Tour:
     did = _driver_id_from_auth(auth)
+    city_raw = (payload.city or "").strip()
     tour = Tour(
         title=payload.title.strip(),
         description=(payload.description or "").strip() or None,
         price=float(payload.base_price),
+        city=city_raw or None,
         owner_driver_id=did,
         capacity=7,
         occupied_seats=0,

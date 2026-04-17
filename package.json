@@ -1,15 +1,17 @@
 {
-  "name": "ncc-root",
+  "name": "ncc-dev",
   "private": true,
   "type": "module",
   "scripts": {
+    "dev:all": "node dev-runner.js",
+    "dev": "node dev-runner.js",
+    "dev:stack": "concurrently -n backend,frontends -c yellow,blue \"npm run dev:backend\" \"npm run dev:frontends\"",
     "dev:backend": "cmd /c \"cd backend && python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8000\"",
-    "dev:dashboard": "npm --prefix ncc-saas-dashboard run dev -- --port 5173 --strictPort",
+    "dev:dashboard": "npm --prefix admin-saas run dev -- --port 5173 --strictPort",
     "dev:driver": "npm --prefix driver-app run dev -- --port 5174 --strictPort",
     "dev:admin": "npm --prefix admin run dev -- --port 3000 --strictPort",
-    "dev:portal": "npm --prefix ncc-portal run dev",
-    "dev:frontends": "wait-on http://127.0.0.1:8000/docs && concurrently -n dashboard,admin,driver -c cyan,magenta,green \"npm run dev:dashboard\" \"npm run dev:admin\" \"npm run dev:driver\"",
-    "dev": "concurrently -n backend,frontends -c yellow,blue \"npm run dev:backend\" \"npm run dev:frontends\""
+    "dev:portal": "npm --prefix portal run dev",
+    "dev:frontends": "wait-on http://127.0.0.1:8000/docs && concurrently -n dashboard,admin,driver -c cyan,magenta,green \"npm run dev:dashboard\" \"npm run dev:admin\" \"npm run dev:driver\""
   },
   "devDependencies": {
     "concurrently": "^9.2.1",

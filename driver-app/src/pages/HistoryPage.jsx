@@ -30,10 +30,6 @@ export default function HistoryPage() {
     <div className="mobile-page">
       <header className="mobile-header">
         <h1>Storico</h1>
-        <nav className="mobile-tabs">
-          <Link to="/today">Oggi</Link>
-          <span className="active">Storico</span>
-        </nav>
       </header>
       {loading ? <p className="muted">Caricamento…</p> : null}
       {err ? <p className="form-error">{err}</p> : null}
@@ -43,7 +39,7 @@ export default function HistoryPage() {
         <ul className="trip-list">
           {rows.map((t) => (
             <li key={t.id}>
-              <Link to={`/trips/${t.id}`} className="trip-card">
+              <Link to={`/driver/trips/${t.id}`} className="trip-card">
                 <div className="trip-card-top">
                   <strong>{t.customer_name || 'Cliente'}</strong>
                   <span className={`pill pill-${t.mobile_status}`}>{t.mobile_status}</span>

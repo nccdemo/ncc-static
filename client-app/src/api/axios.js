@@ -1,8 +1,10 @@
 import axios from 'axios'
 
-/** Proxied to backend: vite → http://localhost:8000/api */
+import { apiBasePath } from './apiUrl.js'
+
+/** Same-origin ``/api`` with Vite proxy when ``VITE_API_URL`` is unset. */
 const instance = axios.create({
-  baseURL: '/api',
+  baseURL: apiBasePath(),
 })
 
 export default instance

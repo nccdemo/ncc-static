@@ -1,9 +1,10 @@
+import logging
 from datetime import date as Date
 from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import exists, func, or_
 from sqlalchemy.orm import Session, joinedload
 
@@ -22,6 +23,8 @@ from app.services.service_sheet import build_service_sheet_data, generate_servic
 from app.services.websocket_manager import manager
 
 router = APIRouter(prefix="/driver", tags=["driver"])
+
+logger = logging.getLogger(__name__)
 
 
 class StartTripBody(BaseModel):
@@ -84,6 +87,9 @@ class DriverTodayBookingItem(BaseModel):
     status: str
     booking_id: int
     trip_id: int | None = None
+    pickup: str | None = None
+    dropoff: str | None = None
+    service_datetime: str | None = Field(default=None, serialization_alias="datetime")
 
 
 class DriverTodayTripItem(BaseModel):
@@ -113,6 +119,16 @@ def _driver_id_from_auth(auth: dict) -> int:
     return int(auth["sub"])
 
 
+class DriverLocationBody(BaseModel):
+    """Current driver GPS ping (JWT identifies driver)."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    lat: float
+    lng: float
+    trip_id: int | None = None
+
+
 def _trip_status_to_mobile(st: TripStatus | str | None) -> str:
     raw = st.value if hasattr(st, "value") else str(st or "")
     u = raw.upper()
@@ -120,7 +136,7 @@ def _trip_status_to_mobile(st: TripStatus | str | None) -> str:
         return "completed"
     if u in ("IN_PROGRESS", "EN_ROUTE", "ARRIVED"):
         return "in_progress"
-    if u == "CANCELLED":
+    if u in ("CANCELLED", "EXPIRED"):
         return "cancelled"
     return "confirmed"
 
@@ -175,6 +191,160 @@ def _display_time_for_driver_booking(b: Booking) -> str:
     return _booking_time_iso(getattr(b, "time", None))
 
 
+def _pickup_dropoff_for_booking_row(b: Booking, trip: Trip | None) -> tuple[str | None, str | None]:
+    if trip is not None:
+        pickup = (getattr(trip, "pickup", None) or getattr(b, "pickup", None) or "").strip() or None
+        drop = (
+            (getattr(trip, "destination", None) or getattr(b, "destination", None) or "").strip() or None
+        )
+        return pickup, drop
+    pu = (getattr(b, "pickup", None) or "").strip() or None
+    dest = (getattr(b, "destination", None) or "").strip() or None
+    return pu, dest
+
+
+def _datetime_iso_for_booking_row(b: Booking, trip: Trip | None) -> str | None:
+    if trip is not None:
+        sa = getattr(trip, "scheduled_at", None) or getattr(trip, "eta", None)
+        if sa is not None:
+            try:
+                return sa.isoformat()
+            except Exception:
+                return str(sa)
+    bd = getattr(b, "date", None)
+    bt = getattr(b, "time", None)
+    if bd is not None and bt is not None:
+        try:
+            return datetime.combine(bd, bt).isoformat()
+        except Exception:
+            pass
+    return None
+
+
+_MARKETPLACE_OPEN_STATUSES: tuple[TripStatus, ...] = (TripStatus.SCHEDULED, TripStatus.PENDING)
+
+
+@router.post("/location")
+def post_driver_current_location(
+    body: DriverLocationBody,
+    db: Session = Depends(get_db),
+    auth: dict = Depends(require_driver),
+) -> dict:
+    """Persist authenticated driver's coordinates (mobile app ``lat`` / ``lng``)."""
+    did = _driver_id_from_auth(auth)
+    if did <= 0:
+        raise HTTPException(status_code=403, detail="Invalid driver token")
+
+    driver = db.query(Driver).filter(Driver.id == int(did)).first()
+    if driver is None:
+        raise HTTPException(status_code=404, detail="Driver not found")
+
+    now = datetime.utcnow()
+    driver.latitude = float(body.lat)
+    driver.longitude = float(body.lng)
+    driver.last_location_update = now
+
+    resolved_trip_id: int | None = None
+    if body.trip_id is not None:
+        tid = int(body.trip_id)
+        if tid > 0:
+            trip = db.query(Trip).filter(Trip.id == tid).first()
+            if trip is None:
+                raise HTTPException(status_code=404, detail="Trip not found")
+            tdid = getattr(trip, "driver_id", None)
+            if tdid is None or int(tdid) != int(did):
+                raise HTTPException(status_code=403, detail="Trip not assigned to this driver")
+            driver.last_location_trip_id = tid
+            resolved_trip_id = tid
+    db.add(driver)
+    db.commit()
+    db.refresh(driver)
+
+    try:
+        from app.routers.drivers import driver_locations
+
+        driver_locations[int(did)] = {
+            "lat": float(body.lat),
+            "lng": float(body.lng),
+            "timestamp": now,
+            "trip_id": resolved_trip_id,
+        }
+    except Exception:
+        pass
+
+    ltid = getattr(driver, "last_location_trip_id", None)
+    manager.broadcast_driver_location_sync(
+        int(did),
+        float(body.lat),
+        float(body.lng),
+        timestamp=now.isoformat(),
+        trip_id=int(ltid) if ltid is not None else None,
+    )
+    return {
+        "ok": True,
+        "driver_id": int(did),
+        "lat": float(body.lat),
+        "lng": float(body.lng),
+        "timestamp": now.isoformat(),
+        "trip_id": int(ltid) if ltid is not None else None,
+    }
+
+
+@router.get("/available-trips")
+def list_driver_available_trips(
+    db: Session = Depends(get_db),
+    _auth: dict = Depends(require_driver),
+) -> list[dict]:
+    """
+    Claimable marketplace trips: ``driver_id`` unset and lifecycle status in the open pool
+    (``SCHEDULED`` / ``PENDING`` — maps to spec ``available``).
+    """
+    trips = (
+        db.query(Trip)
+        .options(joinedload(Trip.booking))
+        .filter(
+            Trip.driver_id.is_(None),
+            Trip.status.in_(_MARKETPLACE_OPEN_STATUSES),
+        )
+        .order_by(Trip.id.desc())
+        .all()
+    )
+    out: list[dict] = []
+    for t in trips:
+        booking = _primary_booking(db, t)
+        price = getattr(t, "price", None)
+        if price is None and booking is not None:
+            price = getattr(booking, "price", None)
+        eta = getattr(t, "eta", None)
+        time_label = None
+        if eta is not None:
+            try:
+                time_label = eta.isoformat()
+            except Exception:
+                time_label = str(eta)
+        elif booking is not None:
+            bd = getattr(booking, "date", None)
+            bt = getattr(booking, "time", None)
+            if bd is not None and bt is not None:
+                tpart = bt.isoformat() if hasattr(bt, "isoformat") else str(bt)
+                time_label = f"{bd.isoformat()} {tpart}"
+            elif bd is not None:
+                time_label = bd.isoformat()
+        out.append(
+            {
+                "id": int(t.id),
+                "pickup": getattr(t, "pickup", None) or (getattr(booking, "pickup", None) if booking else None),
+                "destination": getattr(t, "destination", None)
+                or (getattr(booking, "destination", None) if booking else None),
+                "price": float(price) if price is not None else None,
+                "time": time_label,
+                "service_date": t.service_date.isoformat() if getattr(t, "service_date", None) else None,
+                "status": "available",
+            }
+        )
+    return out
+
+
 @router.get("/today-trips", response_model=list[DriverTodayBookingItem])
 def list_today_trips(
     db: Session = Depends(get_db),
@@ -193,7 +363,7 @@ def list_today_trips(
     )
     rows = (
         db.query(Booking)
-        .options(joinedload(Booking.tour_instance))
+        .options(joinedload(Booking.tour_instance), joinedload(Booking.trip))
         .outerjoin(Trip, Booking.trip_id == Trip.id)
         .filter(
             Booking.date == today,
@@ -213,15 +383,30 @@ def list_today_trips(
         if seats <= 0:
             seats = 1
         tid = getattr(b, "trip_id", None)
+        trip = getattr(b, "trip", None)
+        pickup, dropoff = _pickup_dropoff_for_booking_row(b, trip)
+        dt_iso = _datetime_iso_for_booking_row(b, trip)
+        time_label = _display_time_for_driver_booking(b)
+        if not dt_iso:
+            dt_iso = time_label or None
+        row_status: str
+        if trip is not None and getattr(trip, "status", None) is not None:
+            st = trip.status
+            row_status = st.value if hasattr(st, "value") else str(st)
+        else:
+            row_status = (getattr(b, "status", None) or "confirmed")
         out.append(
             DriverTodayBookingItem(
                 customer_name=(getattr(b, "customer_name", None) or "").strip() or "—",
                 phone=(getattr(b, "phone", None) or "").strip() or "—",
                 seats=seats,
-                time=_display_time_for_driver_booking(b),
-                status=(getattr(b, "status", None) or "confirmed"),
+                time=time_label,
+                status=row_status,
                 booking_id=int(b.id),
                 trip_id=int(tid) if tid is not None else None,
+                pickup=pickup,
+                dropoff=dropoff,
+                service_datetime=dt_iso,
             )
         )
     return out
@@ -247,6 +432,7 @@ def list_trips_history(
                 Trip.service_date < today,
                 Trip.status == TripStatus.COMPLETED,
                 Trip.status == TripStatus.CANCELLED,
+                Trip.status == TripStatus.EXPIRED,
             ),
         )
         .order_by(Trip.id.desc())
@@ -283,7 +469,7 @@ def update_trip_status_mobile(
     cur = trip.status
 
     if target == "confirmed":
-        if cur in (TripStatus.COMPLETED, TripStatus.CANCELLED):
+        if cur in (TripStatus.COMPLETED, TripStatus.CANCELLED, TripStatus.EXPIRED):
             raise HTTPException(status_code=400, detail="Trip already finished")
         if cur == TripStatus.ASSIGNED:
             TripService.accept_trip(db, trip)
@@ -293,7 +479,7 @@ def update_trip_status_mobile(
             db.refresh(trip)
         # ACCEPTED / EN_ROUTE / etc.: idempotent
     elif target == "in_progress":
-        if cur in (TripStatus.COMPLETED, TripStatus.CANCELLED):
+        if cur in (TripStatus.COMPLETED, TripStatus.CANCELLED, TripStatus.EXPIRED):
             raise HTTPException(status_code=400, detail="Trip already finished")
         if cur not in (
             TripStatus.ASSIGNED,
@@ -311,7 +497,7 @@ def update_trip_status_mobile(
         else:
             db.refresh(trip)
     elif target == "completed":
-        if cur == TripStatus.CANCELLED:
+        if cur in (TripStatus.CANCELLED, TripStatus.EXPIRED):
             raise HTTPException(status_code=400, detail="Trip cancelled")
         if cur != TripStatus.IN_PROGRESS:
             raise HTTPException(
@@ -328,6 +514,27 @@ def update_trip_status_mobile(
         trip_id=int(trip.id),
         status=_trip_status_to_mobile(trip.status),
     )
+
+
+@router.post("/trips/{trip_id}/cancel")
+def driver_cancel_assigned_trip(
+    trip_id: int,
+    db: Session = Depends(get_db),
+    auth: dict = Depends(require_driver),
+) -> dict:
+    """Cancel own trip while status is ``ACCEPTED`` (soft cancel; row kept as ``CANCELLED``)."""
+    did = _driver_id_from_auth(auth)
+    trip = db.query(Trip).filter(Trip.id == int(trip_id)).first()
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Trip not found")
+
+    TripService.driver_cancel_own_trip(db, trip=trip, driver_id=did)
+    logger.info(
+        "driver trip cancellation: driver_id=%s trip_id=%s",
+        did,
+        int(trip_id),
+    )
+    return {"success": True, "trip_id": int(trip_id)}
 
 
 @router.get("/trips/{trip_id}", response_model=DriverTripOut)
@@ -605,7 +812,7 @@ def start_trip(
         raise HTTPException(status_code=400, detail="driver_id is required")
 
     st = getattr(trip, "status", None)
-    if st == TripStatus.COMPLETED or st == TripStatus.CANCELLED:
+    if st in (TripStatus.COMPLETED, TripStatus.CANCELLED, TripStatus.EXPIRED):
         raise HTTPException(status_code=400, detail="Trip cannot be started in current status")
 
     trip.status = TripStatus.IN_PROGRESS
@@ -631,10 +838,10 @@ def complete_trip(
     if getattr(trip, "driver_id", None) is None:
         raise HTTPException(status_code=400, detail="driver_id is required")
 
-    trip.status = TripStatus.COMPLETED
-    trip.completed_at = datetime.utcnow()
-    trip.end_km = int(payload.end_km)
-    db.commit()
+    trip.end_km = float(int(payload.end_km))
+    db.add(trip)
+    db.flush()
+    TripService.update_status(db, trip, TripStatus.COMPLETED)
     db.refresh(trip)
 
     # Optional email after completion (best-effort; never breaks endpoint)

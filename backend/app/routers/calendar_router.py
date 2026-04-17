@@ -36,7 +36,7 @@ def _naive(dt: datetime | None) -> datetime | None:
 
 
 def _trip_bounds(trip: Trip) -> tuple[datetime, datetime] | None:
-    if trip.status == TripStatus.CANCELLED:
+    if trip.status in (TripStatus.CANCELLED, TripStatus.EXPIRED):
         return None
     start: datetime | None = None
     if trip.eta is not None:
@@ -89,7 +89,7 @@ def list_calendar_events(
 
     trips = (
         db.query(Trip)
-        .filter(Trip.status != TripStatus.CANCELLED)
+        .filter(Trip.status.notin_((TripStatus.CANCELLED, TripStatus.EXPIRED)))
         .filter(
             or_(
                 and_(Trip.service_date.isnot(None), Trip.service_date >= d0, Trip.service_date <= d1),

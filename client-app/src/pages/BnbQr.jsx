@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { QRCodeCanvas } from 'qrcode.react'
 
-const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
+import { apiUrl } from '../api/apiUrl.js'
 
 export default function BnbQr() {
   const { code } = useParams()
@@ -23,8 +23,10 @@ export default function BnbQr() {
         return
       }
       try {
-        const url = `${API_BASE}/api/bnb/public?code=${encodeURIComponent(normalized)}`
-        const res = await fetch(url, { headers: { Accept: 'application/json' } })
+        const res = await fetch(
+          apiUrl(`/api/bnb/public?code=${encodeURIComponent(normalized)}`),
+          { headers: { Accept: 'application/json' } },
+        )
         const data = await res.json().catch(() => ({}))
         if (cancelled) return
         if (!res.ok || !data || typeof data !== 'object') {
@@ -47,8 +49,10 @@ export default function BnbQr() {
   }, [normalized])
 
   const displayName = brand?.display_name || ''
-  const logoUrl = brand?.logo_url || ''
-  const coverUrl = brand?.cover_image_url || ''
+  const logoRaw = String(brand?.logo_url || '').trim()
+  const coverRaw = String(brand?.cover_image_url || '').trim()
+  const logoUrl = logoRaw ? apiUrl(logoRaw) : ''
+  const coverUrl = coverRaw ? apiUrl(coverRaw) : ''
   const hasCover = Boolean(coverUrl)
   const subtitleLine = displayName
     ? `Esperienze consigliate da ${displayName}`
@@ -88,7 +92,12 @@ export default function BnbQr() {
           {hasCover ? <div className="bnb-qr-hero-overlay" aria-hidden /> : null}
           <div className="bnb-qr-hero-inner">
             {logoUrl ? (
-              <img src={logoUrl} alt={displayName || 'Logo'} className="bnb-qr-logo" />
+              <img
+                src={logoUrl}
+                alt={displayName || 'Logo'}
+                className="bnb-qr-logo"
+                style={{ width: '120px', height: 'auto' }}
+              />
             ) : null}
             {displayName || normalized ? (
               <div className="qr-bnb-name">{displayName || normalized}</div>
@@ -116,7 +125,7 @@ export default function BnbQr() {
               <button type="button" className="btn btn-ghost" onClick={onPrint}>
                 Stampa QR
               </button>
-              <Link to="/" className="btn btn-ghost">
+              <Link to="/explore" className="btn btn-ghost">
                 Vai al sito
               </Link>
             </div>

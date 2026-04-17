@@ -7,7 +7,12 @@ import {
   persistReferralFromUrlSearch,
 } from '../utils/referralStorage'
 
-const API_BASE = (import.meta.env.VITE_API_BASE || '').replace(/\/$/, '')
+import { apiUrl } from '../api/apiUrl.js'
+import { postTourInstanceBooking } from '../api/bookTourInstance.js'
+
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  window.__nccPostTourInstanceBooking = postTourInstanceBooking
+}
 
 function formatSelectedDate(iso) {
   if (iso == null || iso === '') return null
@@ -130,7 +135,7 @@ export default function Checkout() {
         return
       }
       try {
-        const res = await fetch(`${API_BASE}/api/tour-instances/${Number(tourInstanceId)}`)
+        const res = await fetch(apiUrl(`/api/tour-instances/${Number(tourInstanceId)}`))
         const data = await res.json().catch(() => null)
         if (!res.ok) {
           if (!cancelled) setInstance(null)
@@ -141,7 +146,7 @@ export default function Checkout() {
         if (tourFromState) {
           if (!cancelled) setTourRemote(null)
         } else if (data && typeof data === 'object' && data.tour_id != null) {
-          const tr = await fetch(`${API_BASE}/api/tours/${Number(data.tour_id)}`)
+          const tr = await fetch(apiUrl(`/api/tours/${Number(data.tour_id)}`))
           const t = await tr.json().catch(() => null)
           if (!cancelled && tr.ok && t && typeof t === 'object') {
             setTourRemote({
@@ -174,7 +179,11 @@ export default function Checkout() {
     }
     setLoading(true)
     try {
-      const referral = referralCodeForCheckout(location.search)
+      const fromNav =
+        fromState.referral_code != null && String(fromState.referral_code).trim()
+          ? String(fromState.referral_code).trim().toUpperCase()
+          : ''
+      const referral = fromNav || referralCodeForCheckout(location.search) || undefined
       const name = customerName.trim() || 'Cliente'
       const em = email.trim()
       if (!em || !/^\S+@\S+\.\S+$/.test(em)) {
@@ -183,7 +192,7 @@ export default function Checkout() {
       }
       const p = Math.min(Math.max(1, Number(qty) || 1), seatsMax)
       /** Confirmed booking + pagamento: creati lato server al completamento Stripe (webhook). */
-      const res = await fetch(`${API_BASE}/api/payments/create-checkout`, {
+      const res = await fetch(apiUrl('/api/payments/create-checkout'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

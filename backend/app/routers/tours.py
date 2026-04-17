@@ -1,14 +1,12 @@
 from pathlib import Path
-from uuid import uuid4
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, UploadFile, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-from PIL import Image
-from io import BytesIO
 
-from app.config import API_PUBLIC_URL
 from app.crud.tour import create_tour, get_tours
+from app.deps.auth import get_actor_context
+from app.services.tour_image_upload import append_tour_images_from_upload_files
 from app.crud.tour_instance_availability import load_tour_instance_availability
 from app.database import get_db
 from app.models.booking import Booking
@@ -51,8 +49,9 @@ def _public_images_list(raw_urls: list[str] | None) -> list[str]:
 
 def _public_image_url(raw: str | None) -> str:
     """
-    Client apps load images from the API host (Vite does not proxy /uploads).
-    Relative paths become ``API_PUBLIC_URL`` + path; missing values use a public placeholder.
+    Return same-origin paths for uploaded assets (``/uploads/...``, ``/static/...``).
+    SPAs and Vite dev server should proxy those paths to this API.
+    External ``http(s)`` URLs are returned unchanged; empty uses a public placeholder.
     """
     if raw is None:
         return _DEFAULT_PUBLIC_IMAGE
@@ -63,8 +62,8 @@ def _public_image_url(raw: str | None) -> str:
     if lower.startswith("http://") or lower.startswith("https://"):
         return s
     if s.startswith("/"):
-        return f"{API_PUBLIC_URL}{s}"
-    return f"{API_PUBLIC_URL}/{s.lstrip('/')}"
+        return s
+    return f"/{s.lstrip('/')}"
 
 
 @router.get("/public", response_model=list[TourPublicResponse])
@@ -103,30 +102,47 @@ def list_public_tours(db: Session = Depends(get_db)) -> list[TourPublicResponse]
 
 
 @router.get("/", response_model=list[TourResponse])
-def list_tours(db: Session = Depends(get_db)) -> list[TourResponse]:
-    return get_tours(db, only_active=True)
+def list_tours(
+    db: Session = Depends(get_db),
+    actor: dict = Depends(get_actor_context),
+) -> list[TourResponse]:
+    if actor["role"] == "admin":
+        return get_tours(db, only_active=True)
+    return get_tours(db, only_active=True, company_id=int(actor["company_id"]))
 
 
 @router.get("/{tour_id}", response_model=TourResponse)
-def get_tour(tour_id: int, db: Session = Depends(get_db)) -> Tour:
-    tour = db.query(Tour).filter(Tour.id == tour_id).first()
+def get_tour(
+    tour_id: int,
+    db: Session = Depends(get_db),
+    actor: dict = Depends(get_actor_context),
+) -> Tour:
+    q = db.query(Tour).filter(Tour.id == tour_id)
+    if actor["role"] != "admin":
+        q = q.filter(Tour.company_id == int(actor["company_id"]))
+    tour = q.first()
     if tour is None:
         raise HTTPException(status_code=404, detail="Tour not found")
     return tour
 
 
 @router.get("/{tour_id}/bookings")
-def get_tour_bookings(tour_id: int, db: Session = Depends(get_db)) -> list[dict]:
-    tour = db.query(Tour).filter(Tour.id == tour_id).first()
+def get_tour_bookings(
+    tour_id: int,
+    db: Session = Depends(get_db),
+    actor: dict = Depends(get_actor_context),
+) -> list[dict]:
+    tq = db.query(Tour).filter(Tour.id == tour_id)
+    if actor["role"] != "admin":
+        tq = tq.filter(Tour.company_id == int(actor["company_id"]))
+    tour = tq.first()
     if tour is None:
         raise HTTPException(status_code=404, detail="Tour not found")
 
-    bookings = (
-        db.query(Booking)
-        .filter(Booking.tour_id == tour_id)
-        .order_by(Booking.id.desc())
-        .all()
-    )
+    bq = db.query(Booking).filter(Booking.tour_id == tour_id)
+    if actor["role"] != "admin":
+        bq = bq.filter(Booking.company_id == int(actor["company_id"]))
+    bookings = bq.order_by(Booking.id.desc()).all()
 
     return [
         {
@@ -157,11 +173,17 @@ def get_tour_instances(
 def create_tour_endpoint(
     payload: TourCreate,
     db: Session = Depends(get_db),
-    x_role: str = Header(default="driver"),
+    actor: dict = Depends(get_actor_context),
 ) -> TourResponse:
-    if x_role.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Admin role required")
-    return create_tour(db, payload)
+    if actor["role"] == "admin":
+        return create_tour(db, payload)
+    driver = actor.get("driver")
+    return create_tour(
+        db,
+        payload,
+        company_id=int(actor["company_id"]),
+        owner_driver_id=int(getattr(driver, "id")),
+    )
 
 
 @router.put("/{tour_id}", response_model=TourResponse)
@@ -169,16 +191,21 @@ def update_tour_endpoint(
     tour_id: int,
     payload: TourCreate,
     db: Session = Depends(get_db),
-    x_role: str = Header(default="driver"),
+    actor: dict = Depends(get_actor_context),
 ) -> TourResponse:
-    if x_role.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Admin role required")
-
-    tour = db.query(Tour).filter(Tour.id == tour_id).first()
+    q = db.query(Tour).filter(Tour.id == tour_id)
+    if actor["role"] != "admin":
+        q = q.filter(Tour.company_id == int(actor["company_id"]))
+    tour = q.first()
     if tour is None:
         raise HTTPException(status_code=404, detail="Tour not found")
 
     data = payload.model_dump()
+    if actor["role"] != "admin":
+        data["company_id"] = int(actor["company_id"])
+        driver = actor.get("driver")
+        if driver is not None:
+            data["owner_driver_id"] = int(getattr(driver, "id"))
     for k, v in data.items():
         setattr(tour, k, v)
     db.commit()
@@ -190,12 +217,12 @@ def update_tour_endpoint(
 def delete_tour_endpoint(
     tour_id: int,
     db: Session = Depends(get_db),
-    x_role: str = Header(default="driver"),
+    actor: dict = Depends(get_actor_context),
 ) -> dict:
-    if x_role.lower() != "admin":
-        raise HTTPException(status_code=403, detail="Admin role required")
-
-    tour = db.query(Tour).filter(Tour.id == tour_id).first()
+    q = db.query(Tour).filter(Tour.id == tour_id)
+    if actor["role"] != "admin":
+        q = q.filter(Tour.company_id == int(actor["company_id"]))
+    tour = q.first()
     if tour is None:
         raise HTTPException(status_code=404, detail="Tour not found")
 
@@ -267,9 +294,9 @@ def delete_tour_endpoint(
 
 
 @router.post("/{tour_id}/upload-image")
-def upload_tour_image(
+async def upload_tour_image(
     tour_id: int,
-    file: UploadFile = File(...),
+    request: Request,
     db: Session = Depends(get_db),
     x_role: str = Header(default="driver"),
 ) -> dict:
@@ -280,92 +307,6 @@ def upload_tour_image(
     if tour is None:
         raise HTTPException(status_code=404, detail="Tour not found")
 
-    content_type = (file.content_type or "").lower()
-    allowed_types = {
-        "image/jpeg": ".jpg",
-        "image/jpg": ".jpg",
-        "image/png": ".png",
-        "image/webp": ".webp",
-    }
-    if content_type not in allowed_types:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid file type. Only JPEG/PNG/WebP images are allowed.",
-        )
-
-    ext = allowed_types[content_type]
-    filename = f"{uuid4().hex}{ext}"
-
-    base_dir = Path(__file__).resolve().parents[2]  # backend/
-    uploads_dir = base_dir / "uploads" / "tours"
-    uploads_dir.mkdir(parents=True, exist_ok=True)
-
-    # Ensure images is always a list (never None)
-    images = list(getattr(tour, "images", None) or [])
-    tour.images = images
-    if len(images) >= 5:
-        raise HTTPException(status_code=400, detail="Max 5 images allowed per tour")
-
-    dest_path = uploads_dir / filename
-
-    try:
-        max_bytes = 5 * 1024 * 1024  # 5MB
-        raw = bytearray()
-        while True:
-            chunk = file.file.read(1024 * 1024)
-            if not chunk:
-                break
-            raw.extend(chunk)
-            if len(raw) > max_bytes:
-                raise HTTPException(
-                    status_code=400,
-                    detail="File too large. Max size is 5MB.",
-                )
-
-        try:
-            img = Image.open(BytesIO(bytes(raw)))
-            img.load()
-        except Exception as e:
-            raise HTTPException(status_code=400, detail="Invalid image file.") from e
-
-        # Ensure consistent mode for saving (avoid palette/alpha issues on JPEG)
-        if ext == ".jpg":
-            img = img.convert("RGB")
-        elif img.mode not in ("RGB", "RGBA"):
-            img = img.convert("RGBA") if "A" in img.mode else img.convert("RGB")
-
-        # Resize to max width 1200px, keep aspect ratio
-        max_w = 1200
-        if img.width and img.width > max_w:
-            new_h = int(round(img.height * (max_w / float(img.width))))
-            img = img.resize((max_w, max(1, new_h)), Image.LANCZOS)
-
-        save_kwargs: dict = {}
-        if ext == ".jpg":
-            save_kwargs.update({"format": "JPEG", "quality": 80, "optimize": True})
-        elif ext == ".png":
-            save_kwargs.update({"format": "PNG", "optimize": True})
-        elif ext == ".webp":
-            save_kwargs.update({"format": "WEBP", "quality": 80, "method": 6})
-
-        dest_path.parent.mkdir(parents=True, exist_ok=True)
-        img.save(dest_path, **save_kwargs)
-    except HTTPException:
-        try:
-            if dest_path.exists():
-                dest_path.unlink()
-        except Exception:
-            pass
-        raise
-    finally:
-        try:
-            file.file.close()
-        except Exception:
-            pass
-
-    url = f"/uploads/tours/{filename}"
-    images.append(url)
-    tour.images = images
-    db.commit()
-    db.refresh(tour)
-    return {"images": list(tour.images or [])}
+    form = await request.form()
+    upload_files = [x for x in form.getlist("file") if isinstance(x, UploadFile)]
+    return append_tour_images_from_upload_files(db, tour, upload_files)

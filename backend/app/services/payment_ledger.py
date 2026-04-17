@@ -7,15 +7,21 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from app.models.payment import Payment
 
+from app.services.referral_booking import BNB_REFERRAL_COMMISSION_RATE
+
 
 def marketplace_checkout_split_eur(amount_eur: float, has_bnb_id: bool) -> tuple[float, float, float]:
     """
-    Card checkout gross split: with B&B referral 70% / 10% / 20%, else 80% / 0% / 20%.
+    Card checkout gross split: with B&B referral, driver share is remainder after BNB + platform (20%).
+    BNB share equals ``BNB_REFERRAL_COMMISSION_RATE`` (default 10%) — same rate stored on ``bnb_earnings``.
     Returns ``(driver_eur, bnb_eur, platform_eur)``.
     """
     a = max(0.0, float(amount_eur))
     if has_bnb_id:
-        return round(a * 0.7, 2), round(a * 0.1, 2), round(a * 0.2, 2)
+        plat = round(a * 0.2, 2)
+        bnb = round(a * float(BNB_REFERRAL_COMMISSION_RATE), 2)
+        drv = round(a - bnb - plat, 2)
+        return drv, bnb, plat
     return round(a * 0.8, 2), 0.0, round(a * 0.2, 2)
 
 

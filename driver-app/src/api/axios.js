@@ -2,10 +2,10 @@ import axios from 'axios'
 
 import { clearSession, getToken } from '../auth/token.js'
 
-const baseURL = import.meta.env.VITE_API_BASE?.replace(/\/$/, '') || '/api'
+import { apiBasePath } from './apiUrl.js'
 
 const api = axios.create({
-  baseURL,
+  baseURL: apiBasePath(),
   headers: { 'Content-Type': 'application/json' },
   timeout: 30000,
 })
@@ -13,7 +13,13 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   const token = getToken()
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+    const auth = `Bearer ${token}`
+    if (config.headers && typeof config.headers.set === 'function') {
+      config.headers.set('Authorization', auth)
+    } else {
+      config.headers = config.headers || {}
+      config.headers.Authorization = auth
+    }
   }
   return config
 })

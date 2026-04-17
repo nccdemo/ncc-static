@@ -50,9 +50,9 @@ export default function Landing() {
 
       <p className="footer-note">
         Hai già un account?{' '}
-        <Link to="/login">Accedi</Link> — il backend deve essere in esecuzione su{' '}
-        <code style={{ color: 'var(--text-muted)' }}>localhost:8000</code> (proxy Vite su{' '}
-        <code style={{ color: 'var(--text-muted)' }}>/api</code>).
+        <Link to="/login">Accedi</Link> — configura <code style={{ color: 'var(--text-muted)' }}>VITE_API_URL</code>{' '}
+        oppure usa il proxy Vite su <code style={{ color: 'var(--text-muted)' }}>/api</code> (
+        <code style={{ color: 'var(--text-muted)' }}>VITE_DEV_PROXY_TARGET</code> nel dev server).
       </p>
     </>
   )

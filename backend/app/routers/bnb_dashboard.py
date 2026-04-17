@@ -2,6 +2,8 @@
 
 import logging
 import os
+import re
+from urllib.parse import unquote
 
 import jwt
 from typing import Annotated
@@ -35,6 +37,20 @@ from app.services.referral_booking import is_valid_referral_code_format, normali
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["bnb"])
+
+_PUBLIC_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+_PUBLIC_SLUG_RESERVED = frozenset({"qr"})
+
+
+def _parse_public_slug_raw(raw: str) -> str | None:
+    """Return normalized slug or ``None`` if invalid / reserved."""
+    s = (raw or "").strip().lower()
+    if len(s) < 3 or len(s) > 64:
+        return None
+    if s in _PUBLIC_SLUG_RESERVED or not _PUBLIC_SLUG_RE.fullmatch(s):
+        return None
+    return s
+
 
 _bearer_optional = HTTPBearer(auto_error=False)
 
@@ -100,6 +116,10 @@ class BnbDashboardResponse(BaseModel):
         ...,
         description="Sum of booking ``price`` for confirmed rows matching this referral (or bnb_id fallback).",
     )
+    public_slug: str | None = Field(
+        None,
+        description="URL path segment for the public landing ``/bnb/{public_slug}`` (lowercase).",
+    )
 
 
 class BnbPaymentEarningsResponse(BaseModel):
@@ -134,6 +154,10 @@ class BnbMeResponse(ProviderResponse):
         0.0,
         description="Accumulated B&amp;B commission on ``providers.total_earnings``.",
     )
+    public_slug: str | None = Field(
+        None,
+        description="Vanity path for public client landing (``/bnb/{slug}``).",
+    )
 
 
 class BnbMeUpdate(BaseModel):
@@ -144,6 +168,7 @@ class BnbMeUpdate(BaseModel):
     display_name: str | None = None
     logo_url: str | None = None
     cover_image_url: str | None = None
+    public_slug: str | None = None
 
 
 class BnbPublicResponse(BaseModel):
@@ -155,11 +180,19 @@ class BnbPublicResponse(BaseModel):
     city: str | None = None
 
 
+class BnbPublicBySlugResponse(BnbPublicResponse):
+    """Public B&B landing payload: branding + referral for client auto-attribution."""
+
+    referral_code: str
+    public_slug: str
+
+
 class BnbByReferralResponse(BaseModel):
-    """Public B&amp;B snippet: ``name`` = linked user email or business name; raw ``logo_url``."""
+    """Public B&amp;B snippet: ``name`` = linked user email or business name; raw asset paths."""
 
     name: str
     logo_url: str | None = None
+    cover_image_url: str | None = None
 
 
 def _provider_optional_str(value: object) -> str | None:
@@ -213,6 +246,9 @@ def _bnb_me_minimal(prov: Provider, user_email: str | None) -> BnbMeMinimalRespo
 def _bnb_me_response(prov: Provider, user_email: str | None) -> BnbMeResponse:
     rc = normalize_referral_code(getattr(prov, "referral_code", None)) or ""
     email_out = (str(user_email).strip() if user_email else None) or None
+    slug_out = _provider_optional_str(getattr(prov, "public_slug", None))
+    if slug_out:
+        slug_out = slug_out.strip().lower()
     return BnbMeResponse(
         id=int(prov.id),
         referral_code=rc,
@@ -221,6 +257,7 @@ def _bnb_me_response(prov: Provider, user_email: str | None) -> BnbMeResponse:
         logo_url=_provider_optional_str(getattr(prov, "logo_url", None)),
         cover_image_url=_provider_optional_str(getattr(prov, "cover_url", None)),
         display_name=_provider_optional_str(getattr(prov, "display_name", None)),
+        public_slug=slug_out,
     )
 
 
@@ -246,6 +283,39 @@ def _raise_bnb_profile_not_found() -> None:
 def _bnb_type_is_bnb_clause():
     """Match ``providers.type`` as B&B: trim whitespace, case-insensitive ``bnb``."""
     return func.trim(Provider.type).ilike("bnb")
+
+
+def _validate_public_slug_for_update(db: Session, prov: Provider, raw: str | None) -> str | None:
+    """
+    ``None`` clears the slug. Non-empty string must be unique among B&B providers (case-insensitive).
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    norm = _parse_public_slug_raw(s)
+    if norm is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Slug non valido: usa 3–64 caratteri, lettere minuscole, numeri e trattini (es. sanculino-hotel). "
+            "Non usare slug riservati.",
+        )
+    taken = (
+        db.query(Provider.id)
+        .filter(
+            Provider.id != int(prov.id),
+            _bnb_type_is_bnb_clause(),
+            func.lower(Provider.public_slug) == norm,
+        )
+        .first()
+    )
+    if taken is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Questo slug è già in uso. Scegline un altro.",
+        )
+    return norm
 
 
 # LEGACY BNB — ``_bnb_provider_and_email_for_user`` removed; use ``_resolve_bnb_provider_row_and_email``.
@@ -310,10 +380,14 @@ def _dashboard_summary_for_provider(
         canonical = from_provider
 
     if not canonical:
+        ps0 = _provider_optional_str(getattr(provider, "public_slug", None))
+        if ps0:
+            ps0 = ps0.strip().lower()
         return BnbDashboardResponse(
             referral_code="",
             total_bookings=0,
             total_earnings=0.0,
+            public_slug=ps0,
         )
 
     row = db.execute(_EXACT_AGG_SQL, {"rc": canonical}).mappings().first()
@@ -332,10 +406,14 @@ def _dashboard_summary_for_provider(
             total_bookings = int(row_fb["total_bookings"] or 0)
             total_earnings = round(float(row_fb["total_earnings"] or 0.0), 2)
 
+    ps = _provider_optional_str(getattr(provider, "public_slug", None))
+    if ps:
+        ps = ps.strip().lower()
     return BnbDashboardResponse(
         referral_code=canonical,
         total_bookings=total_bookings,
         total_earnings=total_earnings,
+        public_slug=ps,
     )
 
 
@@ -462,7 +540,8 @@ def bnb_by_referral(
     )
     name = email_str or business_name or canonical
     logo_url = _provider_optional_str(getattr(prov, "logo_url", None))
-    return BnbByReferralResponse(name=name, logo_url=logo_url)
+    cover_image_url = _provider_optional_str(getattr(prov, "cover_url", None))
+    return BnbByReferralResponse(name=name, logo_url=logo_url, cover_image_url=cover_image_url)
 
 
 @router.get("/public", response_model=BnbPublicResponse)
@@ -496,6 +575,49 @@ def bnb_public_profile(
         logo_url=_absolute_public_asset_url(logo_url),
         cover_image_url=_absolute_public_asset_url(cover_image_url),
         city=city,
+    )
+
+
+@router.get("/public-by-slug/{slug}", response_model=BnbPublicBySlugResponse)
+def bnb_public_by_slug(
+    slug: str,
+    db: Session = Depends(get_db),
+) -> BnbPublicBySlugResponse:
+    """Public B&B landing: branding + ``referral_code`` for client-side attribution."""
+    norm = _parse_public_slug_raw(unquote(slug))
+    if norm is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="B&B not found")
+
+    row = (
+        db.query(Provider, User.email)
+        .outerjoin(User, User.id == Provider.user_id)
+        .filter(_bnb_type_is_bnb_clause(), func.lower(Provider.public_slug) == norm)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="B&B not found")
+    prov, email = row
+    rc = normalize_referral_code(getattr(prov, "referral_code", None)) or ""
+    if not rc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Partner referral not configured",
+        )
+    display = _provider_optional_str(getattr(prov, "display_name", None))
+    legacy_name = _provider_optional_str(getattr(prov, "name", None))
+    display_name = display or legacy_name or ((str(email).strip() if email else None) or rc)
+    logo_url = _provider_optional_str(getattr(prov, "logo_url", None)) or _provider_optional_str(
+        getattr(prov, "logo", None)
+    )
+    cover_image_url = _provider_optional_str(getattr(prov, "cover_url", None))
+    city = _provider_optional_str(getattr(prov, "city", None))
+    return BnbPublicBySlugResponse(
+        display_name=display_name,
+        logo_url=_absolute_public_asset_url(logo_url),
+        cover_image_url=_absolute_public_asset_url(cover_image_url),
+        city=city,
+        referral_code=rc,
+        public_slug=norm,
     )
 
 
@@ -557,6 +679,12 @@ def bnb_me_update(
         prov.logo_url = _normalize_branding_url_input(updates["logo_url"])
     if "cover_image_url" in updates:
         prov.cover_url = _normalize_branding_url_input(updates["cover_image_url"])
+    if "public_slug" in updates:
+        v = updates["public_slug"]
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            prov.public_slug = None
+        else:
+            prov.public_slug = _validate_public_slug_for_update(db, prov, v)
     db.add(prov)
     db.commit()
     db.refresh(prov)

@@ -15,7 +15,7 @@ export default function LoginPage() {
     setErr('')
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/admin/login', {
+      const res = await fetch('/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ email: email.trim(), password }),
@@ -25,7 +25,7 @@ export default function LoginPage() {
         setErr(typeof data.detail === 'string' ? data.detail : 'Accesso negato')
         return
       }
-      const token = data.access_token
+      const token = data.access_token || data.token
       if (!token) {
         setErr('Risposta non valida dal server')
         return

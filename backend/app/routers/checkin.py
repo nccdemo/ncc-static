@@ -23,6 +23,8 @@ router = APIRouter(tags=["checkin"])
 class CheckinRequest(BaseModel):
     booking_id: int | None = None
     qr: str | None = None
+    """When set (driver app), booking must belong to this trip and driver must be assigned."""
+    expected_trip_id: int | None = None
 
     @model_validator(mode="after")
     def require_one_identifier(self) -> "CheckinRequest":
@@ -47,16 +49,44 @@ def _resolve_booking_id(payload: CheckinRequest) -> int:
     raise HTTPException(status_code=422, detail="Unrecognized qr format")
 
 
+def _assert_booking_on_trip_for_driver(
+    db: Session,
+    *,
+    booking: Booking,
+    expected_trip_id: int,
+    driver_id: int,
+) -> None:
+    trip = db.query(Trip).filter(Trip.id == int(expected_trip_id)).first()
+    if trip is None:
+        raise HTTPException(status_code=404, detail="Viaggio non trovato")
+    if trip.driver_id is None or int(trip.driver_id) != int(driver_id):
+        raise HTTPException(status_code=403, detail="Non sei assegnato a questo viaggio")
+    btid = getattr(booking, "trip_id", None)
+    if btid is None or int(btid) != int(expected_trip_id):
+        raise HTTPException(
+            status_code=403,
+            detail="QR non valido per questo viaggio: la prenotazione non appartiene al trip aperto.",
+        )
+
+
 @router.post("/checkin")
 def checkin(
     payload: CheckinRequest,
     db: Session = Depends(get_db),
-    _driver: dict = Depends(require_driver),
+    auth_driver: dict = Depends(require_driver),
 ) -> dict:
     booking_id = _resolve_booking_id(payload)
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
+
+    if payload.expected_trip_id is not None:
+        _assert_booking_on_trip_for_driver(
+            db,
+            booking=booking,
+            expected_trip_id=int(payload.expected_trip_id),
+            driver_id=int(auth_driver["sub"]),
+        )
 
     pay_ok = str(getattr(booking, "status", "") or "").lower() in ("confirmed", "paid")
     if not pay_ok:
@@ -92,9 +122,11 @@ def checkin(
         db.add(booking)
         db.commit()
 
+        tid_out = int(booking.trip_id) if getattr(booking, "trip_id", None) is not None else None
         return {
             "status": "checked_in",
             "booking_id": booking.id,
+            "trip_id": tid_out,
             "type": "custom_ride",
         }
 
@@ -160,8 +192,11 @@ def checkin(
             },
         )
 
+    tid_tour = int(booking.trip_id) if getattr(booking, "trip_id", None) is not None else None
     return {
         "message": "Check-in successful",
+        "booking_id": booking.id,
+        "trip_id": tid_tour,
         "occupied": int(occupied) + int(booking.people),
         "capacity": capacity,
         "name": booking.customer_name,

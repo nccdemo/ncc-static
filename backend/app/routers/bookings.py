@@ -1,6 +1,6 @@
 from datetime import date as Date, time as Time, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
@@ -9,7 +9,7 @@ from app.config import FRONTEND_URL
 from app.constants.booking_capacity import HELD_BOOKING_STATUSES
 from app.crud.booking import get_bookings
 from app.database import get_db
-from app.deps.auth import require_admin
+from app.deps.auth import get_actor_context, require_admin
 from app.models.booking import Booking
 from app.models.quote import Quote
 from app.models.tour import Tour
@@ -168,6 +168,9 @@ def _run_tour_instance_booking(
         tour = db.query(Tour).filter(Tour.id == tour_id).first()
         if tour is None:
             raise HTTPException(status_code=404, detail="Tour not found")
+        effective_company_id = company_id
+        if effective_company_id is None:
+            effective_company_id = getattr(tour, "company_id", None)
         unit = float(tour.price or 0.0)
         if payload.price is None:
             price = unit * int(payload.seats)
@@ -197,6 +200,7 @@ def _run_tour_instance_booking(
                 _INSERT_BOOKING_SQL,
                 {
                     "company_id": company_id,
+                    "company_id": effective_company_id,
                     "client_id": payload.client_id,
                     "tour_id": tour_id,
                     "tour_instance_id": payload.tour_instance_id,
@@ -404,16 +408,25 @@ def create_booking_endpoint(
 @router.get("/", response_model=list[BookingResponse])
 def get_bookings_endpoint(
     db: Session = Depends(get_db),
+    actor: dict = Depends(get_actor_context),
+    from_: Date | None = Query(default=None, alias="from", description="Filter start date (inclusive)"),
+    to: Date | None = Query(default=None, description="Filter end date (inclusive)"),
 ) -> list[BookingResponse]:
-    return get_bookings(db)
+    if actor["role"] == "admin":
+        return get_bookings(db, date_from=from_, date_to=to)
+    return get_bookings(db, company_id=int(actor["company_id"]), date_from=from_, date_to=to)
 
 
 @router.get("/{id}", response_model=BookingResponse)
 def get_booking_by_id_endpoint(
     id: int,
     db: Session = Depends(get_db),
+    actor: dict = Depends(get_actor_context),
 ) -> BookingResponse:
-    booking = db.query(Booking).filter(Booking.id == id).first()
+    q = db.query(Booking).filter(Booking.id == id)
+    if actor["role"] != "admin":
+        q = q.filter(Booking.company_id == int(actor["company_id"]))
+    booking = q.first()
     if booking is None:
         raise HTTPException(status_code=404, detail="Booking not found")
     return booking
@@ -423,6 +436,7 @@ def get_booking_by_id_endpoint(
 def cancel_booking_endpoint(
     booking_id: int,
     db: Session = Depends(get_db),
+    actor: dict = Depends(get_actor_context),
 ) -> dict:
     """
     Cancel a booking and free seats on the tour instance.
@@ -439,6 +453,9 @@ def cancel_booking_endpoint(
         )
         if booking is None:
             raise HTTPException(status_code=404, detail="Booking not found")
+        if actor["role"] != "admin":
+            if getattr(booking, "company_id", None) != int(actor["company_id"]):
+                raise HTTPException(status_code=403, detail="Forbidden")
         st = str(booking.status or "").strip().lower()
         if st == "confirmed":
             raise HTTPException(
@@ -467,6 +484,7 @@ def cancel_booking_endpoint(
 def refund_booking_endpoint(
     booking_id: int,
     db: Session = Depends(get_db),
+    _admin: dict = Depends(require_admin),
 ) -> dict:
     """
     Refund a Stripe-paid booking (tour) and free seats.
@@ -594,12 +612,16 @@ def refund_booking_endpoint(
 def pay_booking_simulated(
     booking_id: int,
     db: Session = Depends(get_db),
+    actor: dict = Depends(get_actor_context),
 ) -> dict:
     # TODO: integrazione Stripe futura — usare Checkout/PaymentIntent + webhook idempotente al posto di questo endpoint.
     with db.begin():
         b = db.query(Booking).filter(Booking.id == booking_id).with_for_update().one_or_none()
         if b is None:
             raise HTTPException(status_code=404, detail="Booking not found")
+        if actor["role"] != "admin":
+            if getattr(b, "company_id", None) != int(actor["company_id"]):
+                raise HTTPException(status_code=403, detail="Forbidden")
         st = str(b.status or "").lower()
         if st in ("paid", "confirmed"):
             raise HTTPException(status_code=400, detail="Pagamento già effettuato")

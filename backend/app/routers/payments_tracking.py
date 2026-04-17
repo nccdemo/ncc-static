@@ -9,7 +9,7 @@ from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
-from app.deps.auth import bnb_dashboard_dev_bypass_enabled
+from app.deps.auth import bnb_dashboard_dev_bypass_enabled, require_admin
 from app.services.jwt_auth import decode_access_token
 from app.models.booking import Booking
 from app.models.driver_wallet import DriverWallet, DriverWalletTransaction
@@ -64,6 +64,26 @@ class PaymentOut(BaseModel):
     status: str
     stripe_payment_intent: str | None
     created_at: str
+
+    class Config:
+        from_attributes = True
+
+
+class PaymentAdminListOut(BaseModel):
+    """Admin table row: payment + split (platform / B&amp;B / driver)."""
+
+    id: int
+    booking_id: int
+    customer_name: str | None = None
+    email: str | None = None
+    amount: float
+    status: str
+    stripe_payment_intent: str | None = None
+    stripe_session_id: str | None = None
+    created_at: str
+    amount_platform: float = 0.0
+    amount_bnb: float = 0.0
+    amount_driver: float = 0.0
 
     class Config:
         from_attributes = True
@@ -272,6 +292,67 @@ def payments_summary(
         total_bnb=float(tb),
         total_driver=float(td),
     )
+
+
+@router.get("/admin", response_model=list[PaymentAdminListOut])
+def list_payments_admin(
+    db: Session = Depends(get_db),
+    _admin: dict = Depends(require_admin),
+    status: str | None = Query(None, description="Filter by status: pending, paid, refunded, cash_paid"),
+    customer: str | None = Query(None, description="Filter by customer name or email (icontains)"),
+    from_date: Date | None = Query(None),
+    to_date: Date | None = Query(None),
+    limit: int = Query(500, ge=1, le=2000),
+) -> list[PaymentAdminListOut]:
+    """Paginated payment list with ledger splits (JWT role ``admin``)."""
+    q = (
+        db.query(Payment, Booking, User)
+        .join(Booking, Payment.booking_id == Booking.id)
+        .outerjoin(User, Booking.client_id == User.id)
+    )
+    if status:
+        q = q.filter(func.lower(Payment.status) == status.strip().lower())
+    if from_date is not None:
+        q = q.filter(Payment.created_at >= from_date)
+    if to_date is not None:
+        q = q.filter(Payment.created_at <= to_date)
+    if customer:
+        like = f"%{customer.strip()}%"
+        q = q.filter(
+            (Booking.customer_name.ilike(like))
+            | (Booking.email.ilike(like))
+            | (User.email.ilike(like))
+        )
+    q = q.order_by(Payment.created_at.desc()).limit(int(limit))
+    rows = q.all()
+
+    out: list[PaymentAdminListOut] = []
+    for p, b, u in rows:
+        if u is not None:
+            cust_email = getattr(u, "email", None) or getattr(b, "email", None) or "N/A"
+            cust_name = getattr(b, "customer_name", None) or "Guest"
+        else:
+            cust_email = getattr(b, "email", None) or "N/A"
+            cust_name = getattr(b, "customer_name", None) or "Guest"
+        created = p.created_at.isoformat() if p.created_at is not None else ""
+        plat, bnb_amt, drv = platform_bnb_driver_amounts(p)
+        out.append(
+            PaymentAdminListOut(
+                id=int(p.id),
+                booking_id=int(p.booking_id),
+                customer_name=cust_name,
+                email=cust_email,
+                amount=float(p.amount or 0),
+                status=str(p.status or "").lower(),
+                stripe_payment_intent=p.stripe_payment_intent,
+                stripe_session_id=getattr(p, "stripe_session_id", None),
+                created_at=created,
+                amount_platform=round(float(plat), 2),
+                amount_bnb=round(float(bnb_amt), 2),
+                amount_driver=round(float(drv), 2),
+            )
+        )
+    return out
 
 
 def _payments_by_referral_aggregate(

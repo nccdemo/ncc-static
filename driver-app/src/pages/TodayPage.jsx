@@ -29,11 +29,7 @@ export default function TodayPage() {
   return (
     <div className="mobile-page">
       <header className="mobile-header">
-        <h1>Oggi</h1>
-        <nav className="mobile-tabs">
-          <span className="active">Oggi</span>
-          <Link to="/history">Storico</Link>
-        </nav>
+        <h1>Tour oggi</h1>
       </header>
       {loading ? <p className="muted">Caricamento…</p> : null}
       {err ? <p className="form-error">{err}</p> : null}
@@ -58,7 +54,7 @@ export default function TodayPage() {
             return (
               <li key={key}>
                 {row.trip_id != null ? (
-                  <Link to={`/trips/${row.trip_id}`} className="trip-card">
+                  <Link to={`/driver/trips/${row.trip_id}`} className="trip-card">
                     {inner}
                   </Link>
                 ) : (

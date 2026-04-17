@@ -4,12 +4,14 @@ import {
   parseJwtPayload,
 } from '../auth/token.js'
 
-export const API_BASE =
-  import.meta.env.VITE_API_BASE?.replace(/\/$/, '') || '/api'
+import api from './axios.js'
 
 /**
  * Session for mobile app: any valid JWT with role driver (user-based or legacy driver JWT).
  * `sub` may be user id or driver id — API resolves via `require_driver`.
+ *
+ * Returns a **new object** on every call — do **not** use it as a React `useEffect` dependency
+ * (use `getToken()` or a value memoized with `useMemo(..., [getToken()])` instead).
  */
 export function readDriverSession() {
   const token = getToken()
@@ -34,11 +36,13 @@ export function clearDriverSession() {
 export async function validateDriverSessionApi() {
   const token = getToken()
   if (!token) throw new Error('no token')
-  const res = await fetch(`${API_BASE}/driver/me`, {
-    headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
-  })
-  if (res.status === 401 || res.status === 403) throw new Error('unauthorized')
-  if (!res.ok) throw new Error('validation failed')
+  try {
+    await api.get('/driver/me', { headers: { Accept: 'application/json' } })
+  } catch (e) {
+    const status = e?.response?.status
+    if (status === 401 || status === 403) throw new Error('unauthorized')
+    throw new Error('validation failed')
+  }
 }
 
 export function formatApiDetail(detail) {

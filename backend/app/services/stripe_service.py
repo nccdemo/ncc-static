@@ -26,7 +26,7 @@ def _tour_checkout_success_url() -> str:
     u = (os.getenv("STRIPE_TOUR_CHECKOUT_SUCCESS_URL") or "").strip()
     if u:
         return u
-    return f"{_tourist_client_base()}/booking/success?session_id={{CHECKOUT_SESSION_ID}}"
+    return f"{_tourist_client_base()}/success?session_id={{CHECKOUT_SESSION_ID}}"
 
 
 def _tour_checkout_cancel_url() -> str:
@@ -52,11 +52,11 @@ def _payment_intent_metadata_from_session(metadata: dict) -> dict[str, str]:
 
 
 def _default_platform_fee_rate() -> float:
-    raw = (os.getenv("STRIPE_PLATFORM_FEE_RATE") or "0.2").strip()
+    raw = (os.getenv("STRIPE_PLATFORM_FEE_RATE") or "0.15").strip()
     try:
         r = float(raw)
     except ValueError:
-        return 0.2
+        return 0.15
     return min(1.0, max(0.0, r))
 
 
@@ -150,6 +150,44 @@ class CheckoutSessionCreationError(Exception):
         self.status_code = status_code
 
 
+def verify_connect_account_ready_for_charges(connect_account_id: str) -> None:
+    """
+    Destination charges require a Connect account with ``charges_enabled``.
+    Logs and raises :class:`CheckoutSessionCreationError` when Stripe is configured and the account cannot charge.
+    """
+    if not stripe.api_key:
+        return
+    aid = (connect_account_id or "").strip()
+    if not aid:
+        raise CheckoutSessionCreationError(
+            "Account Stripe Connect mancante",
+            status_code=400,
+        )
+    try:
+        acct = stripe.Account.retrieve(aid)
+    except stripe.StripeError as e:
+        logger.exception("Stripe Account.retrieve failed for Connect onboarding check: %s", e)
+        raise CheckoutSessionCreationError("Impossibile verificare l’account Stripe") from e
+
+    charges = bool(acct.get("charges_enabled"))
+    logger.debug(
+        "Stripe Connect account check: account_id=%s charges_enabled=%s payouts_enabled=%s",
+        aid,
+        charges,
+        bool(acct.get("payouts_enabled")),
+    )
+    if not charges:
+        logger.warning(
+            "Blocking payment: Connect account %s has charges_enabled=False (details_submitted=%s)",
+            aid,
+            acct.get("details_submitted"),
+        )
+        raise CheckoutSessionCreationError(
+            "L’autista deve completare l’onboarding Stripe prima di accettare pagamenti con carta.",
+            status_code=400,
+        )
+
+
 def _checkout_session_create(**kwargs):
     try:
         return stripe.checkout.Session.create(**kwargs)
@@ -162,6 +200,8 @@ def create_simple_checkout_session(
     *,
     title: str,
     amount_eur: float,
+    success_url: str | None = None,
+    cancel_url: str | None = None,
 ) -> dict:
     """
     One-off Stripe Checkout (e.g. client-app tour preview): no DB booking; webhook ignores fulfillment.
@@ -173,6 +213,12 @@ def create_simple_checkout_session(
     metadata = {"simple_checkout": "1", "title": title_clean[:120]}
     default_success = f"{client_origin}/?payment=success"
     default_cancel = f"{client_origin}/?payment=cancel"
+    success_final = (success_url or "").strip() or os.getenv(
+        "STRIPE_CLIENT_CHECKOUT_SUCCESS_URL", default_success
+    )
+    cancel_final = (cancel_url or "").strip() or os.getenv(
+        "STRIPE_CLIENT_CHECKOUT_CANCEL_URL", default_cancel
+    )
 
     if stripe.api_key:
         session = _checkout_session_create(
@@ -189,8 +235,8 @@ def create_simple_checkout_session(
                 }
             ],
             metadata=metadata,
-            success_url=os.getenv("STRIPE_CLIENT_CHECKOUT_SUCCESS_URL", default_success),
-            cancel_url=os.getenv("STRIPE_CLIENT_CHECKOUT_CANCEL_URL", default_cancel),
+            success_url=success_final,
+            cancel_url=cancel_final,
         )
         url = session.url
         return {"url": url, "checkout_url": url, "session_id": session.id}
@@ -363,13 +409,18 @@ def create_tour_checkout_session(
     Note: This does NOT create a booking in DB. We rely on Stripe metadata for later fulfillment.
     """
     email = customer_email
+    date_clean = str(date).strip()[:10]
+    people_n = int(passengers)
     metadata = {
         "tour_id": str(tour_id),
         "tour_instance_id": str(tour_instance_id),
         "name": str(name),
         "email": str(email),
-        "date": str(date),
-        "passengers": str(passengers),
+        "date": date_clean,
+        "people": str(people_n),
+        "passengers": str(people_n),
+        "seats": str(people_n),
+        "referral_code": "",
         "has_bnb": "true" if has_bnb else "false",
     }
 
@@ -398,8 +449,11 @@ def create_tour_checkout_session(
                 "tour_instance_id": str(tour_instance_id),
                 "name": str(name),
                 "email": str(email),
-                "date": str(date),
-                "passengers": str(passengers),
+                "date": date_clean,
+                "people": str(people_n),
+                "passengers": str(people_n),
+                "seats": str(people_n),
+                "referral_code": "",
                 "has_bnb": "true" if has_bnb else "false",
             },
             success_url=_tour_checkout_success_url(),
@@ -436,24 +490,26 @@ def create_tour_instance_checkout_session(
     ``Transfer`` in ``apply_bnb_commission_for_payment_intent``.
     """
     phone_s = (phone or "").strip()
+    date_clean = str(instance_date_iso).strip()[:10]
+    people_n = int(people)
+    rc = normalize_referral_code(referral_code)
     metadata = {
-        "tour_id": str(tour_id),
-        "tour_instance_id": str(tour_instance_id),
+        "tour_id": str(int(tour_id)),
+        "tour_instance_id": str(int(tour_instance_id)),
+        "date": date_clean,
+        "people": str(people_n),
+        "passengers": str(people_n),
+        "seats": str(people_n),
+        "referral_code": (rc[:500] if rc else ""),
         "name": str(customer_name),
         "customer_name": str(customer_name)[:500],
         "email": str(email),
-        "passengers": str(people),
-        "seats": str(people),
-        "date": str(instance_date_iso),
         "has_bnb": "true" if has_bnb else "false",
         "driver_id": str(int(driver_id)) if driver_id is not None else "",
     }
     if phone_s:
         metadata["customer_phone"] = phone_s[:500]
         metadata["phone"] = phone_s[:500]
-    rc = normalize_referral_code(referral_code)
-    if rc:
-        metadata["referral_code"] = rc[:500]
     if bnb_id is not None:
         metadata["bnb_id"] = str(int(bnb_id))
     unit_cents = int(round(float(unit_amount_eur) * 100))
@@ -470,21 +526,22 @@ def create_tour_instance_checkout_session(
     if stripe.api_key:
         dest = (connect_destination_account_id or "").strip()
         if not dest:
+            logger.warning("Tour checkout blocked: driver has no stripe_account_id (tour_instance_id=%s)", tour_instance_id)
             raise CheckoutSessionCreationError(
                 "Autista non collegato a Stripe Connect: impossibile creare il pagamento",
                 status_code=400,
             )
+        verify_connect_account_ready_for_charges(dest)
         pi_md = _payment_intent_metadata_from_session(metadata)
         payment_intent_data: dict = {
             "metadata": pi_md,
             "application_fee_amount": application_fee_amount,
             "transfer_data": {"destination": dest},
         }
-        session = _checkout_session_create(
-            payment_method_types=["card"],
-            mode="payment",
-            customer_email=email,
-            line_items=[
+        checkout_params: dict = {
+            "payment_method_types": ["card"],
+            "mode": "payment",
+            "line_items": [
                 {
                     "price_data": {
                         "currency": "eur",
@@ -494,11 +551,15 @@ def create_tour_instance_checkout_session(
                     "quantity": people,
                 }
             ],
-            metadata=metadata,
-            payment_intent_data=payment_intent_data,
-            success_url=_tour_checkout_success_url(),
-            cancel_url=_tour_checkout_cancel_url(),
-        )
+            "metadata": metadata,
+            "payment_intent_data": payment_intent_data,
+            "success_url": _tour_checkout_success_url(),
+            "cancel_url": _tour_checkout_cancel_url(),
+        }
+        email_s = (email or "").strip()
+        if email_s:
+            checkout_params["customer_email"] = email_s
+        session = _checkout_session_create(**checkout_params)
         return {"url": session.url}
 
     return {
@@ -519,10 +580,8 @@ def create_ride_payment_intent(
     """
     PaymentIntent for driver-app card payment on a ride.
 
-    If ``connect_destination_account_id`` is set (Stripe Connect ``acct_…``), uses a
-    destination charge with ``application_fee_amount`` (platform) and
-    ``transfer_data.destination`` (driver). Otherwise behaves like a standard
-    platform PaymentIntent (existing behavior).
+    Requires a Stripe Connect ``acct_…`` on the driver: destination charge with
+    ``application_fee_amount`` (platform) and ``transfer_data.destination`` (driver).
     """
     if not stripe.api_key:
         raise CheckoutSessionCreationError("Stripe non configurato")
@@ -542,12 +601,21 @@ def create_ride_payment_intent(
     }
 
     dest = (connect_destination_account_id or "").strip()
-    if dest:
-        rate = _default_platform_fee_rate() if platform_fee_rate is None else float(platform_fee_rate)
-        rate = min(1.0, max(0.0, rate))
-        fee_cents = _application_fee_cents(amount_cents, rate)
-        params["application_fee_amount"] = fee_cents
-        params["transfer_data"] = {"destination": dest}
+    if not dest:
+        logger.warning(
+            "Ride PaymentIntent blocked: missing connect_destination_account_id (ride_id=%s)",
+            ride_id,
+        )
+        raise CheckoutSessionCreationError(
+            "Autista non collegato a Stripe Connect: impossibile creare il pagamento",
+            status_code=400,
+        )
+    verify_connect_account_ready_for_charges(dest)
+    rate = _default_platform_fee_rate() if platform_fee_rate is None else float(platform_fee_rate)
+    rate = min(1.0, max(0.0, rate))
+    fee_cents = _application_fee_cents(amount_cents, rate)
+    params["application_fee_amount"] = fee_cents
+    params["transfer_data"] = {"destination": dest}
 
     try:
         intent = stripe.PaymentIntent.create(**params)

@@ -1,4 +1,4 @@
-/** Canonical JWT storage key for admin + driver (see ncc-portal). */
+/** Canonical JWT storage key for admin + driver (see portal). */
 export const TOKEN_KEY = 'token'
 
 export function getToken() {

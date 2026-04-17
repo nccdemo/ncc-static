@@ -3,9 +3,11 @@ import logging
 import os
 import threading
 from datetime import date as Date
+from datetime import datetime, timezone
 from typing import Annotated
+from urllib.parse import urlparse
 
-from pydantic import BaseModel, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
@@ -14,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.booking import Booking
+from app.models.driver import Driver
 from app.models.quote import Quote
 from app.models.stripe_webhook_event import StripeWebhookEvent
 from app.models.payment import Payment
@@ -27,7 +30,8 @@ from app.services.email_service import (
 )
 from app.services.quote_service import fulfill_quote_to_booking_and_trip
 from app.services.referral_booking import (
-    increment_provider_bnb_earnings,
+    apply_referral_to_booking,
+    record_bnb_commission_after_payment,
     resolve_valid_bnb_referral,
 )
 from app.services.ride_commission import split_for_booking_and_trip
@@ -57,7 +61,8 @@ from app.services.tour_instance_availability import (
     capacity_and_held,
     log_overbooking_reject,
 )
-from app.services.tour_stripe_booking import create_tour_booking_checkout
+from app.services.tour_stripe_booking import create_tour_booking_checkout, verify_checkout_session_paid
+from app.services.websocket_manager import manager
 from app.services.trip_service import TripService
 from app.utils.referral_from_host import get_referral_from_host
 
@@ -295,17 +300,14 @@ def _webhook_fulfill_booking_checkout(db: Session, session: dict, md: dict) -> J
 
     db.refresh(booking)
     booking.payment_status = "paid"
-    ref_strict, bnb_strict = resolve_valid_bnb_referral(db, getattr(booking, "referral_code", None))
-    booking.referral_code = ref_strict
-    booking.bnb_id = bnb_strict
-    db.add(booking)
-    has_bnb = bool(bnb_strict)
+    apply_referral_to_booking(db, booking, md.get("referral_code") or getattr(booking, "referral_code", None))
+    has_bnb = bool(getattr(booking, "bnb_id", None))
     drv_e, bnb_e, plat_e = marketplace_checkout_split_eur(amount_total, has_bnb)
-    ref_pay = ref_strict
+    ref_pay = getattr(booking, "referral_code", None)
     pk_drv = _metadata_positive_int(md, "driver_id") or _coerce_optional_fk(
         getattr(booking, "driver_id", None)
     )
-    pk_bnb = _coerce_optional_fk(bnb_strict)
+    pk_bnb = _coerce_optional_fk(getattr(booking, "bnb_id", None))
     payment = insert_payment(
         db,
         {
@@ -323,8 +325,14 @@ def _webhook_fulfill_booking_checkout(db: Session, session: dict, md: dict) -> J
             "ride_id": getattr(booking, "trip_id", None),
         },
     )
-    if pk_bnb is not None:
-        increment_provider_bnb_earnings(db, int(pk_bnb), float(bnb_e))
+    if pk_bnb is not None and float(bnb_e or 0) > 0:
+        record_bnb_commission_after_payment(
+            db,
+            payment=payment,
+            bnb_provider_id=int(pk_bnb),
+            commission_eur=float(bnb_e),
+            gross_eur=amount_total,
+        )
     try:
         db.commit()
         db.refresh(booking)
@@ -387,14 +395,15 @@ def _webhook_fulfill_quote_checkout(db: Session, session: dict, md: dict) -> JSO
     if pi:
         booking.payment_intent_id = str(pi)
     booking.payment_status = "paid"
-    has_bnb = checkout_metadata_has_bnb_id(md, booking)
+    apply_referral_to_booking(db, booking, md.get("referral_code"))
+    db.add(booking)
+    has_bnb = checkout_metadata_has_bnb_id(md, booking) or bool(getattr(booking, "bnb_id", None))
     drv_e, bnb_e, plat_e = marketplace_checkout_split_eur(amount_total, has_bnb)
     ref_pay = md.get("referral_code") or getattr(booking, "referral_code", None)
     pk_drv = _metadata_positive_int(md, "driver_id") or _coerce_optional_fk(
         getattr(booking, "driver_id", None)
     )
     pk_bnb = _metadata_positive_int(md, "bnb_id") or _coerce_optional_fk(getattr(booking, "bnb_id", None))
-    db.add(booking)
     payment = insert_payment(
         db,
         {
@@ -412,8 +421,14 @@ def _webhook_fulfill_quote_checkout(db: Session, session: dict, md: dict) -> JSO
             "ride_id": getattr(booking, "trip_id", None),
         },
     )
-    if pk_bnb is not None:
-        increment_provider_bnb_earnings(db, int(pk_bnb), float(bnb_e))
+    if pk_bnb is not None and float(bnb_e or 0) > 0:
+        record_bnb_commission_after_payment(
+            db,
+            payment=payment,
+            bnb_provider_id=int(pk_bnb),
+            commission_eur=float(bnb_e),
+            gross_eur=amount_total,
+        )
     try:
         db.commit()
         db.refresh(payment)
@@ -434,6 +449,243 @@ def _webhook_fulfill_quote_checkout(db: Session, session: dict, md: dict) -> JSO
     ).start()
 
     return JSONResponse(status_code=200, content={"status": "success"})
+
+
+def _session_customer_email_from_checkout(session: dict) -> str | None:
+    em = session.get("customer_email")
+    if em:
+        s = str(em).strip()
+        if s:
+            return s
+    cd = session.get("customer_details") or {}
+    em2 = cd.get("email")
+    if em2:
+        s = str(em2).strip()
+        if s:
+            return s
+    return None
+
+
+def _retrieve_checkout_session_enriched(session: dict) -> dict:
+    """Merge Stripe retrieve (customer + metadata) with webhook payload when possible."""
+    sid = session.get("id")
+    if not sid or not getattr(stripe, "api_key", None):
+        return session
+    try:
+        full = stripe.checkout.Session.retrieve(str(sid))
+        if hasattr(full, "to_dict"):
+            return full.to_dict()
+        return dict(full)
+    except Exception as e:
+        logger.info("Stripe Checkout.Session.retrieve skipped: %s", e)
+        return session
+
+
+def _parse_transfer_ride_datetime(md: dict) -> datetime | None:
+    raw = (md.get("ride_datetime") or md.get("datetime") or "").strip()
+    if not raw:
+        return None
+    try:
+        s = raw
+        if s.endswith("Z") and "+" not in s:
+            s = s[:-1] + "+00:00"
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except Exception:
+        return None
+
+
+def _is_ncc_transfer_auto_fulfillment(md: dict) -> bool:
+    """
+    Paid Checkout with no pre-existing booking: create ``Booking`` + ``Trip`` from metadata.
+
+    Required Stripe metadata (``checkout_product`` = ``ncc_transfer`` or ``fulfillment`` = ``transfer_booking``):
+
+    - ``pickup``, ``dropoff``, ``customer_name``
+    - ``ride_datetime`` or ``datetime`` (ISO-8601)
+
+    Optional: ``tour_id``, ``tour_instance_id``, ``customer_email``, ``customer_phone``,
+    ``seats`` / ``people``, ``referral_code``, ``driver_id`` (assign when valid).
+    """
+    if not md:
+        return False
+    prod = str(md.get("checkout_product") or md.get("fulfillment") or "").strip().lower()
+    if prod not in ("ncc_transfer", "transfer_booking"):
+        return False
+    if not str(md.get("pickup") or "").strip() or not str(md.get("dropoff") or "").strip():
+        return False
+    if not str(md.get("customer_name") or "").strip():
+        return False
+    return _parse_transfer_ride_datetime(md) is not None
+
+
+def _webhook_fulfill_ncc_transfer_checkout(db: Session, session: dict, md: dict) -> JSONResponse:
+    """
+    ``checkout.session.completed``: create confirmed ``Booking`` + marketplace ``Trip`` from metadata
+    (pickup / dropoff / datetime / customer), then ledger payment + optional driver assignment.
+    """
+    pay_err = verify_checkout_session_paid(session)
+    if pay_err is not None:
+        return JSONResponse(status_code=200, content={"status": "error", "detail": pay_err})
+
+    sid = str(session.get("id") or "").strip()
+    if not sid:
+        return JSONResponse(status_code=200, content={"status": "error", "detail": "missing checkout session id"})
+
+    if db.query(Booking).filter(Booking.stripe_session_id == sid).first():
+        return JSONResponse(status_code=200, content={"status": "ok", "note": "already_processed"})
+
+    session_full = _retrieve_checkout_session_enriched(session)
+    md_full = dict(session_full.get("metadata") or {})
+    for source in (session.get("metadata") or {}, md or {}):
+        for k, v in (source or {}).items():
+            if v is not None and str(v).strip() != "":
+                md_full[k] = v
+
+    pickup = str(md_full.get("pickup") or "").strip()
+    dropoff = str(md_full.get("dropoff") or "").strip()
+    customer_name = str(md_full.get("customer_name") or "").strip()
+    ride_at = _parse_transfer_ride_datetime(md_full)
+    if ride_at is None:
+        return JSONResponse(status_code=200, content={"status": "error", "detail": "invalid ride_datetime"})
+
+    email = (
+        str(md_full.get("customer_email") or "").strip()
+        or _session_customer_email_from_checkout(session_full)
+        or "customer@example.com"
+    )
+    phone = str(md_full.get("customer_phone") or "").strip() or "—"
+
+    try:
+        seats = int(md_full.get("seats") or md_full.get("people") or 1)
+    except (TypeError, ValueError):
+        seats = 1
+    seats = max(1, seats)
+
+    try:
+        amount_total = float(session_full.get("amount_total") or 0) / 100.0
+    except Exception:
+        amount_total = 0.0
+    if amount_total <= 0:
+        return JSONResponse(
+            status_code=200,
+            content={"status": "error", "detail": "missing or zero amount_total on session"},
+        )
+
+    tour_id = _metadata_positive_int(md_full, "tour_id")
+    tour_instance_id = _metadata_positive_int(md_full, "tour_instance_id")
+    if tour_id is not None and db.query(Tour).filter(Tour.id == int(tour_id)).first() is None:
+        tour_id = None
+    if tour_instance_id is not None:
+        inst = db.query(TourInstance).filter(TourInstance.id == int(tour_instance_id)).first()
+        if inst is None:
+            tour_instance_id = None
+        elif tour_id is None:
+            tour_id = int(inst.tour_id)
+
+    ref_strict, bnb_strict = resolve_valid_bnb_referral(db, md_full.get("referral_code"))
+
+    booking = Booking(
+        customer_name=customer_name,
+        email=email,
+        phone=phone,
+        date=ride_at.date(),
+        time=ride_at.time(),
+        people=seats,
+        price=float(amount_total),
+        status="confirmed",
+        stripe_session_id=sid,
+        pickup=pickup,
+        destination=dropoff,
+        tour_id=tour_id,
+        tour_instance_id=tour_instance_id,
+        referral_code=ref_strict,
+        bnb_id=bnb_strict,
+        payment_status="paid",
+    )
+    pi = session_full.get("payment_intent")
+    if pi:
+        booking.payment_intent_id = str(pi)
+
+    db.add(booking)
+    db.flush()
+
+    drv_override = _metadata_positive_int(md_full, "driver_id")
+    if drv_override is not None and db.query(Driver).filter(Driver.id == int(drv_override)).first() is None:
+        drv_override = None
+
+    trip = TripService.create_from_booking(
+        db,
+        booking,
+        driver_id=drv_override,
+        send_customer_notification=False,
+    )
+    db.refresh(booking)
+    db.refresh(trip)
+
+    has_bnb = checkout_metadata_has_bnb_id(md_full, booking)
+    drv_e, bnb_e, plat_e = marketplace_checkout_split_eur(amount_total, has_bnb)
+    ref_pay = md_full.get("referral_code") or getattr(booking, "referral_code", None)
+    pk_drv = _metadata_positive_int(md_full, "driver_id") or _coerce_optional_fk(getattr(booking, "driver_id", None))
+    pk_bnb = _coerce_optional_fk(bnb_strict)
+    payment = insert_payment(
+        db,
+        {
+            "booking_id": booking.id,
+            "stripe_session_id": sid,
+            "driver_id": pk_drv,
+            "bnb_id": pk_bnb,
+            "total_amount": amount_total,
+            "driver_amount": drv_e,
+            "bnb_amount": bnb_e,
+            "platform_amount": plat_e,
+            "referral_code": ref_pay,
+            "status": "paid",
+            "stripe_payment_intent": str(pi) if pi else None,
+            "ride_id": getattr(booking, "trip_id", None),
+        },
+    )
+    if pk_bnb is not None and float(bnb_e or 0) > 0:
+        record_bnb_commission_after_payment(
+            db,
+            payment=payment,
+            bnb_provider_id=int(pk_bnb),
+            commission_eur=float(bnb_e),
+            gross_eur=amount_total,
+        )
+    try:
+        db.commit()
+        db.refresh(payment)
+    except IntegrityError:
+        db.rollback()
+        logger.info("ncc_transfer webhook: payment duplicate session %s", sid)
+        return JSONResponse(status_code=200, content={"status": "ignored"})
+
+    run_post_checkout_balance_transfers(db, payment, md_full)
+
+    st = trip.status
+    st_val = st.value if hasattr(st, "value") else str(st)
+    manager.broadcast_sync({"event": "trip_updated", "trip_id": int(trip.id), "status": st_val})
+
+    try:
+        threading.Thread(
+            target=send_confirmation_email,
+            kwargs={"to_email": booking.email, "booking": booking},
+            daemon=True,
+        ).start()
+    except Exception as e:
+        logger.warning("Confirmation email thread failed: %s", e)
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "status": "success",
+            "booking_id": int(booking.id),
+            "trip_id": int(trip.id),
+        },
+    )
 
 
 class CheckoutRequest(BaseModel):
@@ -465,13 +717,123 @@ class PayCheckoutSessionBody(BaseModel):
     """
     Either:
     - Exactly one of booking_id (tour/instance pending) or quote_id (custom ride preventivo), or
-    - Client-app style: title + price (simple one-off checkout, no DB booking).
+    - Client-app style: title + price (simple one-off checkout, no DB booking), or
+    - Public tour page: ``tour_id`` + ``date`` (YYYY-MM-DD) + ``people`` (+ optional ``referral_code``).
     """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     booking_id: int | None = None
     quote_id: int | None = None
     title: str | None = None
     price: float | None = None
+    success_url: str | None = None
+    cancel_url: str | None = None
+    tour_id: int | None = None
+    date: str | None = Field(None, description="Tour departure date (YYYY-MM-DD) for ``tour_id`` checkout.")
+    people: int | None = Field(None, ge=1, validation_alias=AliasChoices("people", "seats"))
+    referral_code: str | None = None
+
+    @field_validator("referral_code", mode="before")
+    @classmethod
+    def _normalize_pay_checkout_referral(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        s = str(v).strip().upper()
+        return s or None
+
+
+def _checkout_return_allowed_hosts() -> set[str]:
+    hosts: set[str] = set()
+    raw = os.getenv("STRIPE_CHECKOUT_RETURN_HOSTS") or ""
+    for part in raw.split(","):
+        h = part.strip().lower()
+        if h:
+            hosts.add(h)
+    for env_key in ("PORTAL_PUBLIC_URL", "NCC_PORTAL_URL"):
+        base = (os.getenv(env_key) or "").strip()
+        if not base:
+            continue
+        try:
+            u = urlparse(base if "://" in base else f"https://{base}")
+            if u.hostname:
+                hosts.add(u.hostname.lower())
+        except Exception:
+            continue
+    if not hosts:
+        hosts.update({"localhost", "127.0.0.1"})
+    return hosts
+
+
+def _validated_simple_checkout_return_url(value: str | None, *, field: str) -> str | None:
+    """Absolute http(s) URL whose host is allowlisted (simple checkout only)."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        u = urlparse(s)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"{field}: invalid URL") from exc
+    if u.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail=f"{field}: http or https required")
+    if not u.hostname:
+        raise HTTPException(status_code=400, detail=f"{field}: host required")
+    host = u.hostname.lower()
+    if host not in _checkout_return_allowed_hosts():
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field}: host not allowed; set STRIPE_CHECKOUT_RETURN_HOSTS or PORTAL_PUBLIC_URL",
+        )
+    return s
+
+
+def _create_checkout_session_for_tour_date(db: Session, payload: PayCheckoutSessionBody) -> dict:
+    """Tour detail page: ``tour_id`` + calendar ``date`` + seat count → Stripe Checkout (instance resolved in DB)."""
+    raw_date = (payload.date or "").strip()
+    if not raw_date:
+        raise HTTPException(status_code=400, detail="date is required (YYYY-MM-DD)")
+    try:
+        day = Date.fromisoformat(raw_date[:10])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid date format (expected YYYY-MM-DD)") from exc
+
+    people = int(payload.people or 0)
+    if people < 1:
+        raise HTTPException(status_code=400, detail="people must be >= 1")
+
+    tid = int(payload.tour_id or 0)
+    tour = db.query(Tour).filter(Tour.id == tid).first()
+    if tour is None:
+        raise HTTPException(status_code=404, detail="Tour not found")
+    if not bool(getattr(tour, "active", True)):
+        raise HTTPException(status_code=400, detail="Tour is not available")
+
+    instance = (
+        db.query(TourInstance)
+        .filter(TourInstance.tour_id == tid, TourInstance.date == day)
+        .order_by(TourInstance.id.asc())
+        .first()
+    )
+    if instance is None:
+        raise HTTPException(status_code=404, detail="No departure on this date")
+
+    checkout_body = TourBookingCheckoutCreate(
+        tour_instance_id=int(instance.id),
+        seats=people,
+        customer_name="Cliente",
+        email="",
+        phone=None,
+        referral_code=payload.referral_code,
+        has_bnb=False,
+    )
+    out = create_tour_booking_checkout(db, checkout_body, referral_query=None, referral_subdomain=None)
+    if isinstance(out, dict):
+        url = out.get("url")
+        if url and not out.get("checkout_url"):
+            return {**out, "checkout_url": url}
+    return out
 
 
 @router.post("/payments/create-checkout-session")
@@ -479,11 +841,24 @@ def create_payment_checkout_session(
     payload: PayCheckoutSessionBody,
     db: Session = Depends(get_db),
 ) -> dict:
+    has_tour = payload.tour_id is not None
     has_b = payload.booking_id is not None
     has_q = payload.quote_id is not None
     has_title = payload.title is not None
     has_price = payload.price is not None
     has_generic = has_title or has_price
+
+    if has_tour:
+        if has_b or has_q or has_generic:
+            raise HTTPException(
+                status_code=400,
+                detail="tour_id/date/people cannot be combined with booking_id, quote_id, or title/price",
+            )
+        if payload.date is None or not str(payload.date).strip():
+            raise HTTPException(status_code=400, detail="date is required when tour_id is set")
+        if payload.people is None:
+            raise HTTPException(status_code=400, detail="people is required when tour_id is set")
+        return _create_checkout_session_for_tour_date(db, payload)
 
     if has_generic:
         if has_b or has_q:
@@ -505,8 +880,15 @@ def create_payment_checkout_session(
             raise HTTPException(status_code=400, detail="price must be a number") from None
         if price_val <= 0:
             raise HTTPException(status_code=400, detail="price must be positive")
+        ok_success = _validated_simple_checkout_return_url(payload.success_url, field="success_url")
+        ok_cancel = _validated_simple_checkout_return_url(payload.cancel_url, field="cancel_url")
         try:
-            out = create_simple_checkout_session(title=title, amount_eur=price_val)
+            out = create_simple_checkout_session(
+                title=title,
+                amount_eur=price_val,
+                success_url=ok_success,
+                cancel_url=ok_cancel,
+            )
             return {"checkout_url": out["checkout_url"], "url": out.get("url"), "session_id": out.get("session_id")}
         except CheckoutSessionCreationError:
             raise HTTPException(status_code=500, detail="Pagamento non disponibile") from None
@@ -848,6 +1230,8 @@ async def stripe_payments_webhook(
             resp = _webhook_fulfill_quote_checkout(db, session, md)
         elif md.get("booking_id"):
             resp = _webhook_fulfill_booking_checkout(db, session, md)
+        elif _is_ncc_transfer_auto_fulfillment(md):
+            resp = _webhook_fulfill_ncc_transfer_checkout(db, session, md)
         elif md.get("tour_instance_id"):
             md_tour = normalize_tour_checkout_metadata(db, md)
             if md_tour.get("tour_id"):
