@@ -8,7 +8,7 @@
  * business: email PayPal verificata O Merchant ID (Profilo → Informazioni sull’account).
  */
 window.PAYPAL_CONFIG = {
-  business: "massimosavi48@gmail.com",
+  business: "ballestrinofrancisco@gmail.com",
   /** Opzionale — ID pulsante ospitato dal sito PayPal (1 PC / 1 anno). */
   hostedButtonStandard: "",
   /** Opzionale — ID pulsante ospitato (fino a 3 PC / 1 anno). */
