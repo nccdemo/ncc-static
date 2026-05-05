@@ -10,10 +10,13 @@ ESEGUIBILE (o zip) nella stessa cartella della landing
 2. Apri il file accanto (nella cartella superiore):
    contacts-collector-landing\demo-config.js
 
-3. Imposta "fileName" con il nome ESATTO del file, es.:
-   fileName: "ContactsCollector-Demo.exe"
-   oppure:
-   fileName: "ContactsCollector-Demo.zip"
+3. Imposta "fileName" con il nome ESATTO del file demo, es.:
+   fileName: "PalermoBusinessAgent_Setup_Demo.zip"
+
+File disponibili (questa cartella):
+- PalermoBusinessAgent_Setup_Demo.zip      (Demo)
+- PalermoBusinessAgent_Setup_1PC_1Y.zip    (1 PC / 1 anno)
+- PalermoBusinessAgent_Setup_3PC_1Y.zip    (fino a 3 PC / 1 anno)
 
 4. Ricarica la pagina index.html (meglio da un piccolo server locale o da hosting,
    non da file:// se il browser blocca i download).
@@ -28,6 +31,6 @@ Git
 ---
 Nella root del repo, .gitignore esclude demo/*.exe e demo/*.zip (file grandi).
 In locale lo zip resta in questa cartella; in pubblicazione copia anche
-PalermoBusinessAgent.zip sul server insieme a index.html.
+gli zip necessari sul server insieme a index.html.
 
 PayPal: vedi ../paypal-config.js

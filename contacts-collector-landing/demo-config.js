@@ -7,5 +7,5 @@
  * Esempio: se il file è demo\ContactsCollector.exe → fileName: "ContactsCollector.exe"
  */
 window.DEMO_CONFIG = {
-  fileName: "PalermoBusinessAgent.zip",
+  fileName: "PalermoBusinessAgent_Setup_Demo.zip",
 };

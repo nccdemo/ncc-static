@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Palermo Business Agent — Come funziona</title>
+  <style>
+    :root {
+      --bg: #0c1222;
+      --card: #141c2f;
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --radius: 14px;
+      --max: 980px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(1200px 600px at 20% -10%, rgba(56, 189, 248, 0.18), transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, rgba(34, 197, 94, 0.12), transparent 50%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      min-height: 100vh;
+    }
+    a { color: var(--accent); }
+    header {
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(8px);
+      background: rgba(12, 18, 34, 0.75);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .wrap { max-width: var(--max); margin: 0 auto; padding: 1rem 1.25rem; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
+    .badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      padding: 0.35rem 0.65rem;
+      border-radius: 999px;
+      margin-bottom: 0.75rem;
+    }
+    h1 { font-size: clamp(1.85rem, 4vw, 2.45rem); margin: 0 0 0.5rem; letter-spacing: -0.02em; }
+    h2 { margin: 0 0 0.75rem; font-size: 1.2rem; }
+    p { margin: 0.6rem 0; color: var(--muted); }
+    strong { color: var(--text); }
+    section { padding: 1.5rem 0; }
+    .grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.2rem 1.15rem;
+    }
+    .kpi {
+      display:flex; gap:0.75rem; flex-wrap:wrap;
+      margin-top: 1rem;
+    }
+    .pill {
+      border: 1px solid var(--border);
+      background: rgba(148, 163, 184, 0.08);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 0.35rem 0.6rem;
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+    ul { margin: 0.5rem 0 0; padding-left: 1.05rem; color: var(--muted); }
+    li { margin: 0.25rem 0; }
+    .note {
+      font-size: 0.9rem;
+      color: var(--muted);
+      margin-top: 0.75rem;
+      padding: 0.9rem 1rem;
+      background: rgba(15, 23, 42, 0.55);
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      padding: 0.7rem 0.95rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(148, 163, 184, 0.12);
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .btn:hover { filter: brightness(1.05); }
+    code { font-size: 0.82em; background: rgba(0,0,0,0.25); padding: 0.1rem 0.35rem; border-radius: 4px; color: #c7d2fe; }
+    .nav {
+      display: flex;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .nav a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.4rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(148, 163, 184, 0.08);
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 600;
+      line-height: 1;
+      transition: filter 120ms ease, background 120ms ease, border-color 120ms ease;
+    }
+    .nav a:hover { filter: brightness(1.08); }
+    .nav a:focus-visible { outline: 2px solid rgba(56, 189, 248, 0.6); outline-offset: 2px; }
+    .nav a.nav-primary {
+      border-color: rgba(56, 189, 248, 0.35);
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--text);
+    }
+    .nav a.nav-paypal {
+      border-color: rgba(255, 196, 57, 0.35);
+      background: rgba(255, 196, 57, 0.14);
+      color: var(--text);
+    }
+    footer {
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.85rem;
+      padding: 2rem 0;
+      margin-top: 2rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap topbar">
+      <strong>Palermo Business Agent</strong>
+      <nav class="nav" aria-label="Menu guida">
+        <a href="./index.html" class="nav-primary">← Torna alla landing</a>
+        <a href="./screenshots.html">Screenshot</a>
+        <a href="./index.html#prezzi">Prezzi</a>
+        <a href="./index.html#paypal" class="nav-paypal">PayPal</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap" style="padding-top:1.75rem;">
+    <div class="badge">Guida per clienti</div>
+    <h1>Come funziona</h1>
+    <p style="max-width:80ch;">
+      <strong>Palermo Business Agent</strong> è un software desktop per raccogliere contatti di attività,
+      organizzarli in un database locale e usarli per marketing email e strumenti operativi
+      (etichette, WhatsApp, import Google Maps).
+    </p>
+    <div class="kpi">
+      <span class="pill">Database locale (SQLite)</span>
+      <span class="pill">Esportazione CSV/Excel</span>
+      <span class="pill">Campagne email con segnaposto</span>
+      <span class="pill">Import Google Maps (Places)</span>
+    </div>
+
+    <section>
+      <div class="grid">
+        <article class="card">
+          <h2>1) Ricerca (raccolta contatti)</h2>
+          <p>
+            Nel tab <strong>Ricerca</strong> scegli:
+          </p>
+          <ul>
+            <li><strong>Categorie</strong> (una per riga o separate con <code>;</code>)</li>
+            <li><strong>Zona geografica</strong>: Regione → Provincia → Comune, oppure località manuale (es. “Palermo, PA”), oppure <strong>Tutta Italia</strong></li>
+            <li><strong>Limiti</strong>: massimo schede totali e massimo pagine elenco/categoria</li>
+            <li><strong>Opzioni</strong>: headless (browser invisibile) e modalità più veloce</li>
+          </ul>
+          <p>
+            Quando premi <strong>Avvia ricerca</strong>, il programma apre Chromium e raccoglie i risultati da
+            <strong>PagineGialle.it</strong>, salvandoli automaticamente nel database.
+          </p>
+          <p class="note">
+            <strong>Versione Demo</strong>: limita l’estrazione a <strong>max 50 nominativi per categoria</strong>.
+          </p>
+        </article>
+
+        <article class="card">
+          <h2>2) Database contatti</h2>
+          <p>
+            Nel tab <strong>Database</strong> trovi l’elenco dei contatti salvati in SQLite sul PC (non serve cloud).
+          </p>
+          <ul>
+            <li>Vedere e selezionare contatti</li>
+            <li>Eliminare righe</li>
+            <li>Esportare in <strong>CSV</strong> (Excel o altri strumenti)</li>
+          </ul>
+          <p>
+            I campi supportati includono (in base a cosa viene trovato): nome attività, indirizzo, CAP, provincia,
+            località, telefono, email, sito web, social, WhatsApp, link fonte, ecc.
+          </p>
+        </article>
+
+        <article class="card">
+          <h2>3) Marketing (email)</h2>
+          <p>
+            Nel tab <strong>Marketing</strong> puoi:
+          </p>
+          <ul>
+            <li>Scrivere l’email (anche da “testo semplice” → conversione HTML)</li>
+            <li>Inviare una prova</li>
+            <li>Inviare una campagna a contatti del database oppure a un CSV importato</li>
+            <li>Usare segnaposto nel testo (es. <code>[NOME_ATTIVITA]</code>, <code>[INDIRIZZO]</code>, <code>[EMAIL]</code>, ecc.)</li>
+            <li>Allegare file (PDF/immagini)</li>
+            <li>Registrare un log invii in <code>invii_marketing.csv</code></li>
+          </ul>
+          <div class="note">
+            <strong>Disiscrizione (unsubscribe)</strong>: con l’opzione “Footer disiscrizione + List-Unsubscribe”
+            puoi gestire le richieste di disiscrizione e mantenere una lista esclusi (<code>mailing_list_disiscritti.txt</code>),
+            evitando invii futuri verso quegli indirizzi.
+          </div>
+        </article>
+
+        <article class="card">
+          <h2>4) Etichette</h2>
+          <p>
+            Nel tab <strong>Etichette</strong> puoi generare un PDF di etichette a partire dai contatti salvati.
+          </p>
+        </article>
+
+        <article class="card">
+          <h2>5) Impostazioni</h2>
+          <p>
+            Nel tab <strong>Impostazioni</strong> configuri:
+          </p>
+          <ul>
+            <li>Server SMTP (Gmail o altro provider)</li>
+            <li>Credenziali e porta (TLS/SSL)</li>
+            <li>Parametri utili per invii e integrazioni</li>
+          </ul>
+        </article>
+
+        <article class="card">
+          <h2>Dove salva i dati</h2>
+          <p>Il programma salva tutto in locale, nella cartella dati dell’app:</p>
+          <ul>
+            <li><code>database.db</code> (contatti e campagne)</li>
+            <li><code>invii_marketing.csv</code> (registro invii)</li>
+            <li><code>mailing_list_disiscritti.txt</code> (email escluse)</li>
+          </ul>
+          <p class="note">
+            <strong>Note importanti</strong>: usa volumi e frequenze ragionevoli e rispetta termini d’uso dei portali
+            e normativa privacy/GDPR. La qualità dei dati dipende dalla disponibilità delle informazioni pubbliche.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <div style="display:flex;gap:0.75rem;flex-wrap:wrap;margin-top:0.25rem;">
+      <a class="btn" href="./index.html#prezzi">Vai ai prezzi</a>
+      <a class="btn" href="./index.html#paypal">Acquista con PayPal</a>
+    </div>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      © <span id="y"></span> Palermo Business Agent — Guida “Come funziona”.
+      <div style="margin-top:0.65rem;line-height:1.6;">
+        <strong style="color:var(--text);">DI.S.TE Management s.a.s.</strong>
+        <span style="color:var(--muted);"> — P.IVA/VIES: IT05505920826</span><br />
+        <span style="color:var(--muted);">Via del Bersagliere 45, 90143 Palermo (Italia)</span><br />
+        <span style="color:var(--muted);">Tel: +39 091 5751728 — Cell: +39 393 8110109 — </span>
+        <a href="mailto:ballestrino@libero.it">ballestrino@libero.it</a>
+        <span style="color:var(--muted);"> — </span>
+        <a href="https://www.distemanagement.com" target="_blank" rel="noopener">www.distemanagement.com</a>
+      </div>
+    </div>
+  </footer>
+  <script>
+    document.getElementById("y").textContent = new Date().getFullYear();
+  </script>
+</body>
+</html>
+

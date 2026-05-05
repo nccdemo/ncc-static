@@ -9,21 +9,23 @@
  */
 window.PAYPAL_CONFIG = {
   business: "massimosavi48@gmail.com",
-  /** Opzionale — ID pulsante ospitato dal sito PayPal (Standard). Es. "ABCDEF123..." */
+  /** Opzionale — ID pulsante ospitato dal sito PayPal (1 PC / 1 anno). */
   hostedButtonStandard: "",
-  /** Opzionale — ID pulsante ospitato (Pro). */
+  /** Opzionale — ID pulsante ospitato (fino a 3 PC / 1 anno). */
   hostedButtonPro: "",
   currency: "EUR",
+  /** IVA applicata ai prezzi (es. Italia 22%). */
+  vatRate: 0.22,
   returnUrl: "",
   cancelUrl: "",
   plans: {
     standard: {
-      amount: "49.00",
-      itemName: "Contacts Collector — Licenza standard",
+      netAmount: "49.00",
+      itemName: "Palermo Business Agent — Licenza 1 PC / 1 anno",
     },
     pro: {
-      amount: "99.00",
-      itemName: "Contacts Collector — Licenza Pro",
+      netAmount: "99.00",
+      itemName: "Palermo Business Agent — Licenza fino a 3 PC / 1 anno",
     },
   },
 };

@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>New Contacts Collector — Screenshot</title>
+  <style>
+    :root {
+      --bg: #0c1222;
+      --card: #141c2f;
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --radius: 14px;
+      --max: 980px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(1200px 600px at 20% -10%, rgba(56, 189, 248, 0.18), transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, rgba(34, 197, 94, 0.12), transparent 50%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      min-height: 100vh;
+    }
+    a { color: var(--accent); }
+    header {
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(8px);
+      background: rgba(12, 18, 34, 0.75);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .wrap { max-width: var(--max); margin: 0 auto; padding: 1rem 1.25rem; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap; }
+    .logo {
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 1.15rem;
+    }
+    .nav {
+      display: flex;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .nav a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.4rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(148, 163, 184, 0.08);
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 600;
+      line-height: 1;
+      transition: filter 120ms ease, background 120ms ease, border-color 120ms ease;
+    }
+    .nav a:hover { filter: brightness(1.08); }
+    .nav a:focus-visible { outline: 2px solid rgba(56, 189, 248, 0.6); outline-offset: 2px; }
+    .nav a.nav-primary {
+      border-color: rgba(56, 189, 248, 0.35);
+      background: rgba(56, 189, 248, 0.12);
+    }
+    .hero { padding: 2rem 0 1.25rem; }
+    .badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      padding: 0.35rem 0.65rem;
+      border-radius: 999px;
+      margin-bottom: 0.8rem;
+    }
+    h1 { font-size: clamp(1.65rem, 3.3vw, 2.25rem); margin: 0 0 0.6rem; letter-spacing: -0.02em; }
+    .lead { color: var(--muted); margin: 0; max-width: 80ch; }
+
+    .grid {
+      display: grid;
+      gap: 0.9rem;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      padding: 1rem 0 2rem;
+    }
+    .shot {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      text-decoration: none;
+      color: inherit;
+    }
+    .shot img { width: 100%; height: 170px; object-fit: cover; display: block; }
+    .shot .meta { padding: 0.85rem 0.9rem; }
+    .shot .title { margin: 0; font-weight: 700; font-size: 0.98rem; }
+    .shot .desc { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.9rem; }
+    .shot:hover { filter: brightness(1.05); }
+
+    dialog {
+      width: min(1040px, calc(100vw - 2.25rem));
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      background: rgba(10, 14, 24, 0.95);
+      padding: 0;
+      color: var(--text);
+    }
+    dialog::backdrop { background: rgba(0,0,0,0.65); }
+    .dlg-top {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:1rem;
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .dlg-title { margin: 0; font-weight: 700; font-size: 1rem; }
+    .dlg-btn {
+      border: 1px solid var(--border);
+      background: rgba(148, 163, 184, 0.12);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 0.5rem 0.7rem;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .dlg-body { padding: 1rem; }
+    .dlg-body img { width: 100%; height: auto; display: block; border-radius: 12px; }
+    .note {
+      margin-top: 0.9rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+    footer {
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.85rem;
+      padding: 2rem 0;
+      margin-top: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap topbar">
+      <strong class="logo">NEW CONTACTS COLLECTOR</strong>
+      <nav class="nav" aria-label="Menu">
+        <a href="./index.html" class="nav-primary">← Landing</a>
+        <a href="./come-funziona.html">Come funziona</a>
+        <a href="./index.html#prezzi">Prezzi</a>
+        <a href="./index.html#paypal">PayPal</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="hero">
+      <div class="badge">Screenshot</div>
+      <h1>Guarda l’interfaccia del programma</h1>
+      <p class="lead">
+        Alcuni screenshot reali di <strong>Palermo Business Agent</strong> (ricerca, database, marketing, impostazioni).
+        Clicca su un’immagine per aprirla a schermo intero.
+      </p>
+      <p class="note">Suggerimento: su mobile, ruota lo schermo per leggere meglio le tabelle.</p>
+    </div>
+
+    <section class="grid" aria-label="Galleria screenshot">
+      <a class="shot" href="./screenshots/01-ricerca.png" data-shot title="Ricerca (PagineGialle) — categorie e filtri">
+        <img src="./screenshots/01-ricerca.png" alt="Screenshot: tab Ricerca, categorie PagineGialle e filtri" loading="lazy" />
+        <div class="meta">
+          <p class="title">Ricerca</p>
+          <p class="desc">Categorie, zona geografica e avvio scraping.</p>
+        </div>
+      </a>
+      <a class="shot" href="./screenshots/02-database.png" data-shot title="Database contatti — elenco e azioni">
+        <img src="./screenshots/02-database.png" alt="Screenshot: tab Database contatti con tabella risultati" loading="lazy" />
+        <div class="meta">
+          <p class="title">Database</p>
+          <p class="desc">Elenco contatti, export CSV e arricchimenti.</p>
+        </div>
+      </a>
+      <a class="shot" href="./screenshots/03-marketing-editor.png" data-shot title="Marketing — editor email">
+        <img src="./screenshots/03-marketing-editor.png" alt="Screenshot: tab Marketing, editor email e conversione HTML" loading="lazy" />
+        <div class="meta">
+          <p class="title">Marketing</p>
+          <p class="desc">Editor email e conversione in HTML.</p>
+        </div>
+      </a>
+      <a class="shot" href="./screenshots/04-marketing-destinatari.png" data-shot title="Marketing — destinatari e disiscrizione">
+        <img src="./screenshots/04-marketing-destinatari.png" alt="Screenshot: destinatari, mailing list e disiscrizione" loading="lazy" />
+        <div class="meta">
+          <p class="title">Destinatari</p>
+          <p class="desc">Database/CSV, disiscritti e conformità.</p>
+        </div>
+      </a>
+      <a class="shot" href="./screenshots/05-marketing-invio.png" data-shot title="Marketing — invio campagna e log">
+        <img src="./screenshots/05-marketing-invio.png" alt="Screenshot: invio template e invio campagna, log" loading="lazy" />
+        <div class="meta">
+          <p class="title">Invio</p>
+          <p class="desc">Invio prova/campagna e log operazioni.</p>
+        </div>
+      </a>
+      <a class="shot" href="./screenshots/06-impostazioni.png" data-shot title="Impostazioni — SMTP e chiavi API">
+        <img src="./screenshots/06-impostazioni.png" alt="Screenshot: tab Impostazioni, SMTP e chiavi API" loading="lazy" />
+        <div class="meta">
+          <p class="title">Impostazioni</p>
+          <p class="desc">SMTP e chiavi esterne (Google Places).</p>
+        </div>
+      </a>
+      <a class="shot" href="./screenshots/07-etichette.png" data-shot title="Etichette — anteprima A4">
+        <img src="./screenshots/07-etichette.png" alt="Screenshot: tab Etichette, anteprima foglio A4" loading="lazy" />
+        <div class="meta">
+          <p class="title">Etichette</p>
+          <p class="desc">Generazione PDF etichette da contatti.</p>
+        </div>
+      </a>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      © <span id="y"></span> New Contacts Collector — Screenshot.
+    </div>
+  </footer>
+
+  <dialog id="dlg">
+    <div class="dlg-top">
+      <p class="dlg-title" id="dlg-title">Screenshot</p>
+      <button class="dlg-btn" id="dlg-close" type="button">Chiudi</button>
+    </div>
+    <div class="dlg-body">
+      <img id="dlg-img" alt="" />
+    </div>
+  </dialog>
+
+  <script>
+    document.getElementById("y").textContent = new Date().getFullYear();
+    (function () {
+      var dlg = document.getElementById("dlg");
+      var img = document.getElementById("dlg-img");
+      var ttl = document.getElementById("dlg-title");
+      var close = document.getElementById("dlg-close");
+      if (!dlg || !img || !ttl || !close) return;
+
+      function openShot(href, title, alt) {
+        ttl.textContent = title || "Screenshot";
+        img.src = href;
+        img.alt = alt || title || "Screenshot";
+        if (typeof dlg.showModal === "function") dlg.showModal();
+        else window.open(href, "_blank", "noopener");
+      }
+
+      document.querySelectorAll("[data-shot]").forEach(function (a) {
+        a.addEventListener("click", function (e) {
+          e.preventDefault();
+          openShot(a.getAttribute("href"), a.getAttribute("title"), a.querySelector("img") && a.querySelector("img").alt);
+        });
+      });
+
+      close.addEventListener("click", function () { dlg.close(); });
+      dlg.addEventListener("click", function (e) {
+        if (e.target === dlg) dlg.close();
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && dlg.open) dlg.close();
+      });
+    })();
+  </script>
+</body>
+</html>
+

@@ -104,6 +104,44 @@
       margin-top: 2rem;
     }
     code { font-size: 0.82em; background: rgba(0,0,0,0.25); padding: 0.1rem 0.35rem; border-radius: 4px; }
+    .nav {
+      display: flex;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .nav a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.4rem 0.65rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(148, 163, 184, 0.08);
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 600;
+      line-height: 1;
+      transition: filter 120ms ease, background 120ms ease, border-color 120ms ease;
+    }
+    .nav a:hover { filter: brightness(1.08); }
+    .nav a:focus-visible { outline: 2px solid rgba(56, 189, 248, 0.6); outline-offset: 2px; }
+    .nav a.nav-primary {
+      border-color: rgba(56, 189, 248, 0.35);
+      background: rgba(56, 189, 248, 0.12);
+      color: var(--text);
+    }
+    .nav a.nav-paypal {
+      border-color: rgba(255, 196, 57, 0.35);
+      background: rgba(255, 196, 57, 0.14);
+      color: var(--text);
+    }
+    .logo {
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 1.33em; /* ~un terzo più grande */
+    }
     .faq-list { display: flex; flex-direction: column; gap: 0.65rem; max-width: 720px; }
     .faq-list details {
       background: var(--card);
@@ -164,13 +202,15 @@
 <body>
   <header>
     <div class="wrap" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
-      <strong>Contacts Collector</strong>
-      <nav style="display:flex;gap:1rem;font-size:0.9rem;">
-        <a href="#prezzi">Prezzi</a>
+      <strong class="logo">NEW CONTACTS COLLECTOR</strong>
+      <nav class="nav" aria-label="Menu">
+        <a href="#prezzi" class="nav-primary">Prezzi</a>
         <a href="#demo">Demo</a>
+        <a href="./come-funziona.html">Come funziona</a>
+        <a href="./screenshots.html">Screenshot</a>
         <a href="#faq">FAQ</a>
         <a href="#guida-places-api">Places API</a>
-        <a href="#paypal">PayPal</a>
+        <a href="#paypal" class="nav-paypal">PayPal</a>
       </nav>
     </div>
   </header>
@@ -178,11 +218,17 @@
   <main class="wrap">
     <div class="hero">
       <div class="badge">Nuova landing</div>
-      <h1>Raccogli e organizza i contatti, senza casino.</h1>
+      <h1>Basta copia e incolla. Inizia a collezionare contatti.</h1>
       <p class="lead">
-        Landing dedicata: prezzi chiari, download della demo e pagamento con PayPal.
-        Configura <code>paypal-config.js</code> e <code>demo-config.js</code> (file demo nella cartella <code>demo/</code>).
+        Trovare nuovi potenziali clienti non deve essere un lavoro a tempo pieno. Con <strong>New Contacts Collector</strong>
+        automatizzi la raccolta dei dati per il tuo marketing: scarichi liste pulite e pronte all'uso mentre tu ti concentri sulla vendita.
+        Meno sforzo, più contatti, zero casino.
       </p>
+      <div style="margin-top:1.25rem;display:flex;gap:0.75rem;flex-wrap:wrap;">
+        <a class="btn btn-secondary" href="./come-funziona.html">Come funziona</a>
+        <a class="btn btn-secondary" href="./screenshots.html">Screenshot</a>
+        <a class="btn btn-primary" href="#prezzi">Vedi prezzi</a>
+      </div>
     </div>
 
     <section id="prezzi">
@@ -198,27 +244,29 @@
           <a class="btn btn-secondary" id="demo" href="./demo/" download>Scarica demo</a>
         </article>
         <article class="card">
-          <h3 style="margin:0;font-size:1rem;">Licenza standard</h3>
-          <p class="price">49€ <small>/ una tantum (esempio)</small></p>
+          <h3 style="margin:0;font-size:1rem;">Licenza 1 PC</h3>
+          <p class="price">49€ <small>+ IVA 22% / 1 anno</small></p>
           <ul>
-            <li>1 utente / 1 macchina (adatta tu)</li>
-            <li>Aggiornamenti minori</li>
+            <li>Valida per 1 computer</li>
+            <li>Durata: 12 mesi</li>
+            <li>Fatturazione: 49€ + IVA (totale 59,78€)</li>
           </ul>
           <a class="btn btn-primary" href="#paypal">Acquista con PayPal</a>
         </article>
         <article class="card">
-          <h3 style="margin:0;font-size:1rem;">Pro</h3>
-          <p class="price">99€ <small>/ una tantum (esempio)</small></p>
+          <h3 style="margin:0;font-size:1rem;">Licenza fino a 3 PC</h3>
+          <p class="price">99€ <small>+ IVA 22% / 1 anno</small></p>
           <ul>
-            <li>Più postazioni o funzioni extra</li>
-            <li>Supporto prioritario (se lo offri)</li>
+            <li>Installazione fino a 3 computer</li>
+            <li>Durata: 12 mesi</li>
+            <li>Fatturazione: 99€ + IVA (totale 120,78€)</li>
           </ul>
           <a class="btn btn-primary" href="#paypal">Acquista con PayPal</a>
         </article>
       </div>
       <p class="note">
-        Copia l’eseguibile (o lo zip) in <code>demo/</code> e il nome file in <code>demo-config.js</code> (<code>fileName</code>).
-        Su alcuni browser il download di <code>.exe</code> da web può mostrare un avviso di sicurezza: è normale; in alternativa offri uno <code>.zip</code> che contiene l’exe.
+        I prezzi in pagina sono <strong>al netto IVA</strong>. Il pagamento PayPal viene configurato per addebitare il totale <strong>IVA inclusa</strong>
+        (22% di default, modificabile in <code>paypal-config.js</code>).
       </p>
     </section>
 
@@ -467,7 +515,7 @@ Link utili:
       </p>
       <div class="grid" style="max-width:640px;">
         <div class="card">
-          <h3 style="margin:0 0 0.5rem;font-size:1rem;">Licenza standard</h3>
+          <h3 style="margin:0 0 0.5rem;font-size:1rem;">Licenza 1 PC / 1 anno</h3>
           <p style="margin:0 0 1rem;color:var(--muted);font-size:0.9rem;" data-plan-desc="standard"></p>
           <form id="paypal-form-standard" action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
             <input type="hidden" name="cmd" value="_xclick" />
@@ -485,7 +533,7 @@ Link utili:
           </form>
         </div>
         <div class="card">
-          <h3 style="margin:0 0 0.5rem;font-size:1rem;">Licenza Pro</h3>
+          <h3 style="margin:0 0 0.5rem;font-size:1rem;">Licenza fino a 3 PC / 1 anno</h3>
           <p style="margin:0 0 1rem;color:var(--muted);font-size:0.9rem;" data-plan-desc="pro"></p>
           <form id="paypal-form-pro" action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
             <input type="hidden" name="cmd" value="_xclick" />
@@ -516,7 +564,16 @@ Link utili:
 
   <footer>
     <div class="wrap">
-      © <span id="y"></span> Contacts Collector — Landing statica.
+      © <span id="y"></span> New Contacts Collector — Landing statica.
+      <div style="margin-top:0.65rem;line-height:1.6;">
+        <strong style="color:var(--text);">DI.S.TE Management s.a.s.</strong>
+        <span style="color:var(--muted);"> — P.IVA/VIES: IT05505920826</span><br />
+        <span style="color:var(--muted);">Via del Bersagliere 45, 90143 Palermo (Italia)</span><br />
+        <span style="color:var(--muted);">Tel: +39 091 5751728 — Cell: +39 393 8110109 — </span>
+        <a href="mailto:ballestrino@libero.it">ballestrino@libero.it</a>
+        <span style="color:var(--muted);"> — </span>
+        <a href="https://www.distemanagement.com" target="_blank" rel="noopener">www.distemanagement.com</a>
+      </div>
     </div>
   </footer>
   <script src="./demo-config.js"></script>
@@ -592,6 +649,8 @@ Link utili:
         if (warn) warn.style.display = "block";
         return;
       }
+      var vatRate = typeof c.vatRate === "number" ? c.vatRate : 0.22;
+      if (!(vatRate >= 0 && vatRate <= 1)) vatRate = 0.22;
       var hbStd = String(c.hostedButtonStandard || "").trim();
       var hbPro = String(c.hostedButtonPro || "").trim();
       var bizOk =
@@ -609,6 +668,11 @@ Link utili:
         var form = document.getElementById(formId);
         var plan = c.plans[planKey];
         if (!form || !plan) return;
+
+        var net = parseFloat(plan.netAmount || plan.amount || "0");
+        if (!(net > 0)) net = 0;
+        var gross = Math.round(net * (1 + vatRate) * 100) / 100;
+        var grossStr = gross.toFixed(2);
 
         var hostedId =
           planKey === "standard"
@@ -642,7 +706,7 @@ Link utili:
           });
           form.querySelector('[data-paypal-field="business"]').value = String(c.business || "").trim();
           form.querySelector('[data-paypal-field="item_name"]').value = plan.itemName;
-          form.querySelector('[data-paypal-field="amount"]').value = plan.amount;
+          form.querySelector('[data-paypal-field="amount"]').value = grossStr;
           form.querySelector('[data-paypal-field="currency_code"]').value = c.currency || "EUR";
         }
 
@@ -667,25 +731,37 @@ Link utili:
 
         var desc = document.querySelector('[data-plan-desc="' + planKey + '"]');
         if (desc) {
-          var euros =
+          var eurosNet =
             (c.currency || "EUR") === "EUR"
-              ? parseFloat(plan.amount).toLocaleString("it-IT", {
+              ? net.toLocaleString("it-IT", {
                   minimumFractionDigits: 2,
                   maximumFractionDigits: 2,
                 }) + " €"
-              : plan.amount + " " + (c.currency || "EUR");
-          desc.textContent = euros + " — " + plan.itemName;
+              : String(plan.netAmount || plan.amount || "");
+          var eurosGross =
+            (c.currency || "EUR") === "EUR"
+              ? gross.toLocaleString("it-IT", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }) + " €"
+              : grossStr + " " + (c.currency || "EUR");
+          desc.textContent =
+            eurosNet +
+            " + IVA (" +
+            eurosGross +
+            " totale) — " +
+            plan.itemName;
         }
 
         var btn = form.querySelector("button[type=submit]");
         if (btn) {
           var label =
             (c.currency || "EUR") === "EUR"
-              ? parseFloat(plan.amount).toLocaleString("it-IT", {
+              ? gross.toLocaleString("it-IT", {
                   minimumFractionDigits: 0,
                   maximumFractionDigits: 2,
                 }) + " €"
-              : plan.amount + " " + (c.currency || "EUR");
+              : grossStr + " " + (c.currency || "EUR");
           btn.textContent = "Paga con PayPal — " + label;
         }
       }
