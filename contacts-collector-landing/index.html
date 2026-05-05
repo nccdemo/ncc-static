@@ -1,0 +1,698 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Contacts Collector — Demo &amp; acquisto</title>
+  <style>
+    :root {
+      --bg: #0c1222;
+      --card: #141c2f;
+      --border: rgba(255, 255, 255, 0.08);
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent2: #22c55e;
+      --radius: 14px;
+      --max: 920px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(1200px 600px at 20% -10%, rgba(56, 189, 248, 0.18), transparent 55%),
+        radial-gradient(900px 500px at 100% 0%, rgba(34, 197, 94, 0.12), transparent 50%),
+        var(--bg);
+      color: var(--text);
+      line-height: 1.55;
+      min-height: 100vh;
+    }
+    a { color: var(--accent); }
+    header {
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(8px);
+      background: rgba(12, 18, 34, 0.75);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .wrap { max-width: var(--max); margin: 0 auto; padding: 1rem 1.25rem; }
+    .hero { padding: 3rem 0 2rem; }
+    .badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--accent);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      padding: 0.35rem 0.65rem;
+      border-radius: 999px;
+      margin-bottom: 1rem;
+    }
+    h1 { font-size: clamp(1.85rem, 4vw, 2.6rem); margin: 0 0 0.75rem; letter-spacing: -0.02em; }
+    .lead { color: var(--muted); font-size: 1.05rem; max-width: 52ch; margin: 0; }
+    section { padding: 2.25rem 0; }
+    h2 { font-size: 1.25rem; margin: 0 0 1rem; }
+    .grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.35rem 1.25rem;
+      display: flex;
+      flex-direction: column;
+    }
+    .price { font-size: 2rem; font-weight: 700; margin: 0.25rem 0; }
+    .price small { font-size: 0.95rem; font-weight: 500; color: var(--muted); }
+    ul { margin: 0.5rem 0 0; padding-left: 1.1rem; color: var(--muted); }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      margin-top: auto;
+      padding: 0.75rem 1rem;
+      border-radius: 10px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      font-size: 0.95rem;
+    }
+    .btn-primary { background: linear-gradient(135deg, #38bdf8, #0ea5e9); color: #0b1220; }
+    .btn-secondary { background: rgba(148, 163, 184, 0.12); color: var(--text); border: 1px solid var(--border); }
+    .btn-paypal { background: #ffc439; color: #003087; }
+    .btn:hover { filter: brightness(1.05); }
+    .note {
+      font-size: 0.85rem;
+      color: var(--muted);
+      margin-top: 1rem;
+      padding: 0.85rem 1rem;
+      background: rgba(15, 23, 42, 0.55);
+      border: 1px dashed var(--border);
+      border-radius: 10px;
+    }
+    footer {
+      border-top: 1px solid var(--border);
+      color: var(--muted);
+      font-size: 0.85rem;
+      padding: 2rem 0;
+      margin-top: 2rem;
+    }
+    code { font-size: 0.82em; background: rgba(0,0,0,0.25); padding: 0.1rem 0.35rem; border-radius: 4px; }
+    .faq-list { display: flex; flex-direction: column; gap: 0.65rem; max-width: 720px; }
+    .faq-list details {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .faq-list summary {
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.98rem;
+      padding: 1rem 1.15rem;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--text);
+    }
+    .faq-list summary::-webkit-details-marker { display: none; }
+    .faq-list summary::after {
+      content: "+";
+      margin-left: auto;
+      color: var(--accent);
+      font-weight: 700;
+      font-size: 1.1rem;
+    }
+    .faq-list details[open] summary::after { content: "−"; }
+    .faq-body {
+      padding: 0 1.15rem 1.15rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+      border-top: 1px solid var(--border);
+    }
+    .faq-body p { margin: 0.75rem 0 0; }
+    .faq-body p:first-child { margin-top: 0.85rem; }
+    .faq-body strong { color: var(--text); }
+    .faq-body ul { margin: 0.5rem 0 0; }
+    /* Testo per "Copia la guida" (nascosto anche se Tailwind non carica) */
+    #places-guide-copy {
+      position: absolute !important;
+      width: 1px !important;
+      height: 1px !important;
+      padding: 0 !important;
+      margin: -1px !important;
+      overflow: hidden !important;
+      clip: rect(0, 0, 0, 0) !important;
+      white-space: nowrap !important;
+      border: 0 !important;
+    }
+  </style>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      corePlugins: { preflight: false },
+    };
+  </script>
+</head>
+<body>
+  <header>
+    <div class="wrap" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;">
+      <strong>Contacts Collector</strong>
+      <nav style="display:flex;gap:1rem;font-size:0.9rem;">
+        <a href="#prezzi">Prezzi</a>
+        <a href="#demo">Demo</a>
+        <a href="#faq">FAQ</a>
+        <a href="#guida-places-api">Places API</a>
+        <a href="#paypal">PayPal</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="hero">
+      <div class="badge">Nuova landing</div>
+      <h1>Raccogli e organizza i contatti, senza casino.</h1>
+      <p class="lead">
+        Landing dedicata: prezzi chiari, download della demo e pagamento con PayPal.
+        Configura <code>paypal-config.js</code> e <code>demo-config.js</code> (file demo nella cartella <code>demo/</code>).
+      </p>
+    </div>
+
+    <section id="prezzi">
+      <h2>Prezzi</h2>
+      <div class="grid">
+        <article class="card">
+          <h3 style="margin:0;font-size:1rem;">Demo</h3>
+          <p class="price">0€ <small>/ prova locale</small></p>
+          <ul>
+            <li>Funzioni limitate o periodo di prova</li>
+            <li>Download sotto</li>
+          </ul>
+          <a class="btn btn-secondary" id="demo" href="./demo/" download>Scarica demo</a>
+        </article>
+        <article class="card">
+          <h3 style="margin:0;font-size:1rem;">Licenza standard</h3>
+          <p class="price">49€ <small>/ una tantum (esempio)</small></p>
+          <ul>
+            <li>1 utente / 1 macchina (adatta tu)</li>
+            <li>Aggiornamenti minori</li>
+          </ul>
+          <a class="btn btn-primary" href="#paypal">Acquista con PayPal</a>
+        </article>
+        <article class="card">
+          <h3 style="margin:0;font-size:1rem;">Pro</h3>
+          <p class="price">99€ <small>/ una tantum (esempio)</small></p>
+          <ul>
+            <li>Più postazioni o funzioni extra</li>
+            <li>Supporto prioritario (se lo offri)</li>
+          </ul>
+          <a class="btn btn-primary" href="#paypal">Acquista con PayPal</a>
+        </article>
+      </div>
+      <p class="note">
+        Copia l’eseguibile (o lo zip) in <code>demo/</code> e il nome file in <code>demo-config.js</code> (<code>fileName</code>).
+        Su alcuni browser il download di <code>.exe</code> da web può mostrare un avviso di sicurezza: è normale; in alternativa offri uno <code>.zip</code> che contiene l’exe.
+      </p>
+    </section>
+
+    <section id="faq">
+      <h2>Domande frequenti (FAQ)</h2>
+      <div class="faq-list">
+        <details class="faq-item">
+          <summary>Qual è la differenza tra l’estrazione da Pagine Gialle e Google Maps?</summary>
+          <div class="faq-body">
+            <p>Entrambe sono ottime fonti, ma con scopi diversi:</p>
+            <p><strong>Pagine Gialle:</strong> ideale per trovare aziende consolidate che curano la loro presenza istituzionale. Spesso i dati includono numeri di telefono fissi certificati e categorie merceologiche molto precise secondo lo standard italiano.</p>
+            <p><strong>Google Maps:</strong> è il database più aggiornato al mondo. Include anche piccole attività, negozi locali e professionisti che non sono iscritti agli elenchi classici. È imbattibile per la capillarità geografica.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>Perché dovrei usare le API di Google Maps se posso usare lo scraper di Pagine Gialle?</summary>
+          <div class="faq-body">
+            <p>L’integrazione di Google Maps ti permette di:</p>
+            <ul>
+              <li><strong>Copertura totale:</strong> trovare attività che hanno aperto di recente.</li>
+              <li><strong>Recensioni e orari:</strong> visualizzare il rating dell’attività per filtrare solo i lead migliori.</li>
+              <li><strong>Sincronizzazione:</strong> incrociando i dati, il software elimina i duplicati e ti fornisce un database pulito e completo.</li>
+            </ul>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>Usare Google Maps ha un costo?</summary>
+          <div class="faq-body">
+            <p>Google Cloud mette a disposizione un <strong>credito gratuito mensile</strong> (oggi spesso intorno ai <strong>200 USD</strong> per molti servizi Maps Platform: controlla sempre le condizioni aggiornate sul sito ufficiale). Con quel credito puoi effettuare migliaia di ricerche senza spendere nulla, finché resti nei limiti del piano.</p>
+            <p>Se superi la soglia, paghi solo ciò che consumi direttamente a Google; per un uso professionale “normale” la quota gratuita è di solito più che sufficiente.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>I dati estratti sono legali?</summary>
+          <div class="faq-body">
+            <p>Sì: il software automatizza la raccolta di dati già pubblicamente disponibili sul web. Tuttavia è <strong>responsabilità dell’utente</strong> utilizzare questi dati (in particolare email e numeri di telefono) nel rispetto del GDPR e delle leggi locali sul marketing diretto.</p>
+          </div>
+        </details>
+        <details class="faq-item">
+          <summary>Posso esportare i dati in Excel?</summary>
+          <div class="faq-body">
+            <p>Certamente. Una volta terminata l’estrazione (da qualsiasi sorgente), puoi esportare l’intero database in formato <strong>CSV / Excel</strong> con un clic, pronto per essere importato nel tuo CRM o nel software di invio mail.</p>
+          </div>
+        </details>
+      </div>
+    </section>
+
+    <section id="guida-places-api" class="border-t border-white/10 pt-10 mt-2" aria-labelledby="places-api-heading">
+      <div class="max-w-3xl mx-auto px-1">
+        <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+          <div>
+            <p class="text-sky-400 text-xs font-semibold tracking-wider uppercase mb-2">Guida pratica</p>
+            <h2 id="places-api-heading" class="text-2xl sm:text-3xl font-bold text-slate-100 tracking-tight">
+              Google Places API
+            </h2>
+            <p class="text-slate-400 mt-2 text-sm sm:text-base max-w-xl leading-relaxed">
+              Passaggi chiari per collegare il software a Google Cloud: pensata per chi non è sviluppatore.
+              Ogni passo richiede pochi minuti; serve un account Google (Gmail va bene).
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2 shrink-0">
+            <button
+              type="button"
+              id="btn-copy-places-guide"
+              class="inline-flex items-center gap-2 rounded-lg bg-slate-800 px-4 py-2.5 text-sm font-medium text-slate-100 ring-1 ring-inset ring-white/10 hover:bg-slate-700/90 transition-colors"
+            >
+              <svg class="h-4 w-4 text-sky-400 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184" />
+              </svg>
+              Copia la guida
+            </button>
+            <a
+              href="https://console.cloud.google.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="inline-flex items-center gap-2 rounded-lg bg-sky-500 px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-sky-400 transition-colors"
+            >
+              <svg class="h-4 w-4 shrink-0" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+              </svg>
+              Apri Google Cloud
+            </a>
+          </div>
+        </div>
+
+        <ol class="relative border-l border-slate-700/90 ml-3 sm:ml-4 space-y-6 pb-2">
+          <li class="pl-8 sm:pl-10 relative">
+            <span class="absolute -left-[17px] sm:-left-[18px] top-0 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/20 ring-2 ring-sky-500/50 text-sm font-bold text-sky-300">1</span>
+            <div class="rounded-xl bg-slate-900/60 ring-1 ring-white/10 p-5 sm:p-6">
+              <div class="flex items-start gap-3">
+                <span class="mt-0.5 rounded-lg bg-slate-800 p-2 ring-1 ring-white/5">
+                  <svg class="h-5 w-5 text-sky-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0 0 13.5 3h-6a2.25 2.25 0 0 0-2.25 2.25v13.5A2.25 2.25 0 0 0 7.5 21h6a2.25 2.25 0 0 0 2.25-2.25V15M12 9l-3 3m0 0 3 3m-3-3h12.75" />
+                  </svg>
+                </span>
+                <div>
+                  <h3 class="text-base font-semibold text-slate-100">Accedi a Google Cloud Console</h3>
+                  <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+                    Apri il browser e vai su <strong class="text-slate-300">Google Cloud Console</strong> (puoi usare il pulsante «Apri Google Cloud» qui sopra).
+                    Accedi con il tuo account Google aziendale o personale: sarà l’amministratore del progetto.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </li>
+          <li class="pl-8 sm:pl-10 relative">
+            <span class="absolute -left-[17px] sm:-left-[18px] top-0 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/20 ring-2 ring-sky-500/50 text-sm font-bold text-sky-300">2</span>
+            <div class="rounded-xl bg-slate-900/60 ring-1 ring-white/10 p-5 sm:p-6">
+              <div class="flex items-start gap-3">
+                <span class="mt-0.5 rounded-lg bg-slate-800 p-2 ring-1 ring-white/5">
+                  <svg class="h-5 w-5 text-emerald-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 10.5v6m3-3H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+                  </svg>
+                </span>
+                <div>
+                  <h3 class="text-base font-semibold text-slate-100">Crea un nuovo progetto</h3>
+                  <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+                    Dal menu in alto, seleziona <strong class="text-slate-300">Progetto nuovo</strong> e assegna un nome chiaro, ad esempio
+                    <code class="rounded bg-black/30 px-1.5 py-0.5 text-sky-200 text-xs">Integrazione Mappe</code>.
+                    Attendi qualche secondo: Google preparerà le risorse del progetto.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </li>
+          <li class="pl-8 sm:pl-10 relative">
+            <span class="absolute -left-[17px] sm:-left-[18px] top-0 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/20 ring-2 ring-sky-500/50 text-sm font-bold text-sky-300">3</span>
+            <div class="rounded-xl bg-slate-900/60 ring-1 ring-white/10 p-5 sm:p-6">
+              <div class="flex items-start gap-3">
+                <span class="mt-0.5 rounded-lg bg-slate-800 p-2 ring-1 ring-white/5">
+                  <svg class="h-5 w-5 text-amber-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 21.75 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 6.75 21Z" />
+                  </svg>
+                </span>
+                <div>
+                  <h3 class="text-base font-semibold text-slate-100">Attiva la fatturazione (Billing)</h3>
+                  <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+                    Dal menu laterale o dalla barra di ricerca, apri <strong class="text-slate-300">Fatturazione</strong> e collega una carta di credito al progetto.
+                    È un passaggio <strong class="text-slate-300">obbligatorio</strong> per usare le API Places: senza billing attivo, le richieste vengono bloccate.
+                  </p>
+                  <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+                    Google applica in genere un <strong class="text-slate-300">credito gratuito mensile</strong> (spesso indicativo, nell’ordine di <strong class="text-slate-300">200 USD</strong> per Maps Platform: verifica sempre l’importo aggiornato nella documentazione ufficiale).
+                    Finché resti entro quel credito, non paghi nulla; oltre la soglia paghi solo il consumo effettivo.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </li>
+          <li class="pl-8 sm:pl-10 relative">
+            <span class="absolute -left-[17px] sm:-left-[18px] top-0 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/20 ring-2 ring-sky-500/50 text-sm font-bold text-sky-300">4</span>
+            <div class="rounded-xl bg-slate-900/60 ring-1 ring-white/10 p-5 sm:p-6">
+              <div class="flex items-start gap-3">
+                <span class="mt-0.5 rounded-lg bg-slate-800 p-2 ring-1 ring-white/5">
+                  <svg class="h-5 w-5 text-violet-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.053 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
+                  </svg>
+                </span>
+                <div>
+                  <h3 class="text-base font-semibold text-slate-100">Abilita Places API</h3>
+                  <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+                    Vai su <strong class="text-slate-300">API e servizi → Libreria</strong> (o cerca «Library» nella console).
+                    Nella casella di ricerca scrivi <strong class="text-slate-300">Places API</strong>, apri il risultato ufficiale Google e clicca <strong class="text-slate-300">Abilita</strong>.
+                  </p>
+                  <p class="mt-3">
+                    <a
+                      href="https://console.cloud.google.com/apis/library/places-backend.googleapis.com"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="text-sm font-medium text-sky-400 hover:text-sky-300 underline underline-offset-2"
+                    >Apri direttamente la scheda Places API →</a>
+                  </p>
+                </div>
+              </div>
+            </div>
+          </li>
+          <li class="pl-8 sm:pl-10 relative">
+            <span class="absolute -left-[17px] sm:-left-[18px] top-0 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/20 ring-2 ring-sky-500/50 text-sm font-bold text-sky-300">5</span>
+            <div class="rounded-xl bg-slate-900/60 ring-1 ring-white/10 p-5 sm:p-6">
+              <div class="flex items-start gap-3">
+                <span class="mt-0.5 rounded-lg bg-slate-800 p-2 ring-1 ring-white/5">
+                  <svg class="h-5 w-5 text-sky-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z" />
+                  </svg>
+                </span>
+                <div>
+                  <h3 class="text-base font-semibold text-slate-100">Crea la API Key</h3>
+                  <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+                    Vai su <strong class="text-slate-300">API e servizi → Credenziali</strong>, poi <strong class="text-slate-300">Crea credenziali → Chiave API</strong>.
+                    Copia la chiave e incollala nell’app nella sezione dedicata (es. Impostazioni / Google Places), senza condividerla pubblicamente.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </li>
+          <li class="pl-8 sm:pl-10 relative">
+            <span class="absolute -left-[17px] sm:-left-[18px] top-0 flex h-8 w-8 items-center justify-center rounded-full bg-sky-500/20 ring-2 ring-sky-500/50 text-sm font-bold text-sky-300">6</span>
+            <div class="rounded-xl bg-slate-900/60 ring-1 ring-white/10 p-5 sm:p-6">
+              <div class="flex items-start gap-3">
+                <span class="mt-0.5 rounded-lg bg-slate-800 p-2 ring-1 ring-white/5">
+                  <svg class="h-5 w-5 text-rose-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
+                  </svg>
+                </span>
+                <div>
+                  <h3 class="text-base font-semibold text-slate-100">Proteggi la chiave (consigliato)</h3>
+                  <p class="mt-2 text-sm text-slate-400 leading-relaxed">
+                    Subito dopo la creazione, apri la chiave e aggiungi <strong class="text-slate-300">Restrizioni applicazione</strong>:
+                    per un’app web o desktop è buona norma limitare per <strong class="text-slate-300">referrer HTTP</strong> (domini autorizzati) o per IP, così la chiave non è utilizzabile da siti estranei se finisce per errore in un repository pubblico.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </li>
+        </ol>
+
+        <p class="mt-8 text-xs text-slate-500 leading-relaxed border-t border-white/10 pt-6">
+          Le schermate di Google possono cambiare nel tempo: se un pulsante ha un nome leggermente diverso, usa la ricerca nella console con le parole chiave indicate sopra.
+          Per supporto commerciale sul prodotto, contatta chi ti ha fornito la licenza.
+        </p>
+      </div>
+
+      <pre id="places-guide-copy" class="sr-only">GUIDA GOOGLE PLACES API — Contacts Collector
+
+1) Accedi a Google Cloud Console (console.cloud.google.com) con il tuo account Google.
+
+2) Crea un nuovo progetto (es. nome "Integrazione Mappe") dal selettore progetti in alto.
+
+3) Attiva la Fatturazione (Billing) sul progetto: è obbligatoria per le API Places. Google offre in genere un credito gratuito mensile (verifica importo aggiornato su documentazione Google Cloud / Maps Platform).
+
+4) Vai su API e servizi → Libreria, cerca "Places API", apri il prodotto ufficiale e clicca Abilita.
+
+5) Vai su API e servizi → Credenziali → Crea credenziali → Chiave API. Copia la chiave e incollala nell'app (Impostazioni / Google Places).
+
+6) Consiglio: modifica la chiave e aggiungi Restrizioni applicazione (referrer HTTP o IP) per ridurre abusi se la chiave viene esposta.
+
+Link utili:
+- Console: https://console.cloud.google.com/
+- Scheda Places API: https://console.cloud.google.com/apis/library/places-backend.googleapis.com
+</pre>
+    </section>
+
+    <section id="paypal">
+      <h2>Pagamento PayPal</h2>
+      <p id="paypal-config-warning" class="note" style="display:none;margin-bottom:1rem;">
+        Apri <code>paypal-config.js</code> e imposta <code>business</code> con la tua email PayPal Business (o Merchant ID). Salva e ricarica la pagina.
+      </p>
+      <div class="grid" style="max-width:640px;">
+        <div class="card">
+          <h3 style="margin:0 0 0.5rem;font-size:1rem;">Licenza standard</h3>
+          <p style="margin:0 0 1rem;color:var(--muted);font-size:0.9rem;" data-plan-desc="standard"></p>
+          <form id="paypal-form-standard" action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+            <input type="hidden" name="cmd" value="_xclick" />
+            <input type="hidden" name="charset" value="utf-8" />
+            <input type="hidden" name="lc" value="IT" />
+            <input type="hidden" name="no_shipping" value="1" />
+            <input type="hidden" value="" disabled class="js-paypal-hosted" />
+            <input type="hidden" name="business" value="" class="js-paypal-manual" data-paypal-field="business" />
+            <input type="hidden" name="item_name" value="" class="js-paypal-manual" data-paypal-field="item_name" />
+            <input type="hidden" name="amount" value="" class="js-paypal-manual" data-paypal-field="amount" />
+            <input type="hidden" name="currency_code" value="EUR" class="js-paypal-manual" data-paypal-field="currency_code" />
+            <input type="hidden" name="return" value="" disabled />
+            <input type="hidden" name="cancel_return" value="" disabled />
+            <button type="submit" class="btn btn-paypal" style="width:100%;">Paga con PayPal</button>
+          </form>
+        </div>
+        <div class="card">
+          <h3 style="margin:0 0 0.5rem;font-size:1rem;">Licenza Pro</h3>
+          <p style="margin:0 0 1rem;color:var(--muted);font-size:0.9rem;" data-plan-desc="pro"></p>
+          <form id="paypal-form-pro" action="https://www.paypal.com/cgi-bin/webscr" method="post" target="_top">
+            <input type="hidden" name="cmd" value="_xclick" />
+            <input type="hidden" name="charset" value="utf-8" />
+            <input type="hidden" name="lc" value="IT" />
+            <input type="hidden" name="no_shipping" value="1" />
+            <input type="hidden" value="" disabled class="js-paypal-hosted" />
+            <input type="hidden" name="business" value="" class="js-paypal-manual" data-paypal-field="business" />
+            <input type="hidden" name="item_name" value="" class="js-paypal-manual" data-paypal-field="item_name" />
+            <input type="hidden" name="amount" value="" class="js-paypal-manual" data-paypal-field="amount" />
+            <input type="hidden" name="currency_code" value="EUR" class="js-paypal-manual" data-paypal-field="currency_code" />
+            <input type="hidden" name="return" value="" disabled />
+            <input type="hidden" name="cancel_return" value="" disabled />
+            <button type="submit" class="btn btn-paypal" style="width:100%;">Paga con PayPal</button>
+          </form>
+        </div>
+      </div>
+      <p class="note" style="margin-top:1rem;max-width:640px;">
+        I valori arrivano da <code>paypal-config.js</code>. Se PayPal mostra <strong>GENERIC_ERROR</strong>, usa i pulsanti ospitati:
+        imposta <code>hostedButtonStandard</code> / <code>hostedButtonPro</code> con gli ID copiati dal pannello PayPal (Pagamenti → Pulsanti pagamento).
+        Verifica anche che l’account ricevente possa accettare EUR e pagamenti dal tuo Paese.
+      </p>
+      <p class="note" style="margin-top:0.75rem;max-width:640px;">
+        Per contare demo vs clic su PayPal configura <code>stats-config.js</code> e un piccolo backend (es. Worker in <code>stats/</code>). I clic PayPal non equivalgono ai pagamenti completati senza webhook PayPal.
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      © <span id="y"></span> Contacts Collector — Landing statica.
+    </div>
+  </footer>
+  <script src="./demo-config.js"></script>
+  <script src="./paypal-config.js"></script>
+  <script src="./stats-config.js"></script>
+  <script src="./stats-track.js"></script>
+  <script>
+    document.getElementById("y").textContent = new Date().getFullYear();
+
+    (function setupPlacesGuideCopy() {
+      var btn = document.getElementById("btn-copy-places-guide");
+      var src = document.getElementById("places-guide-copy");
+      if (!btn || !src) return;
+      var label = btn.innerHTML;
+      btn.addEventListener("click", function () {
+        var text = (src.textContent || "").trim();
+        function done() {
+          btn.textContent = "Copiato!";
+          setTimeout(function () {
+            btn.innerHTML = label;
+          }, 2200);
+        }
+        function fail() {
+          window.alert(
+            "Copia negli appunti non riuscita. Usa un browser aggiornato o copia il testo dalla console Guida (visualizza sorgente pagina e cerca places-guide-copy)."
+          );
+        }
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(text).then(done).catch(fail);
+        } else {
+          fail();
+        }
+      });
+    })();
+
+    (function wireDemoLink() {
+      var cfg = window.DEMO_CONFIG || {};
+      var name = (cfg.fileName && String(cfg.fileName).trim()) || "ContactsCollector-Demo.exe";
+      if (name.indexOf("/") !== -1 || name.indexOf("\\") !== -1) name = "ContactsCollector-Demo.exe";
+      var a = document.getElementById("demo");
+      if (!a) return;
+      a.href = "./demo/" + encodeURIComponent(name);
+      a.setAttribute("download", name);
+    })();
+
+    (function wireStatsTracking() {
+      var track = typeof window.trackLandingEvent === "function" ? window.trackLandingEvent : null;
+      if (!track) return;
+      var demo = document.getElementById("demo");
+      if (demo) {
+        demo.addEventListener("click", function () {
+          track("demo_download");
+        });
+      }
+      var fs = document.getElementById("paypal-form-standard");
+      var fp = document.getElementById("paypal-form-pro");
+      if (fs) {
+        fs.addEventListener("submit", function () {
+          track("checkout_standard");
+        });
+      }
+      if (fp) {
+        fp.addEventListener("submit", function () {
+          track("checkout_pro");
+        });
+      }
+    })();
+
+    (function applyPayPal() {
+      var c = window.PAYPAL_CONFIG;
+      var warn = document.getElementById("paypal-config-warning");
+      if (!c || !c.plans) {
+        if (warn) warn.style.display = "block";
+        return;
+      }
+      var hbStd = String(c.hostedButtonStandard || "").trim();
+      var hbPro = String(c.hostedButtonPro || "").trim();
+      var bizOk =
+        c.business &&
+        String(c.business).indexOf("INSERISCI") === -1 &&
+        String(c.business).trim() !== "";
+      var stdOk = hbStd || bizOk;
+      var proOk = hbPro || bizOk;
+      if (!stdOk || !proOk) {
+        if (warn) warn.style.display = "block";
+        return;
+      }
+
+      function wire(planKey, formId) {
+        var form = document.getElementById(formId);
+        var plan = c.plans[planKey];
+        if (!form || !plan) return;
+
+        var hostedId =
+          planKey === "standard"
+            ? String(c.hostedButtonStandard || "").trim()
+            : String(c.hostedButtonPro || "").trim();
+        var hbEl = form.querySelector(".js-paypal-hosted");
+        var manualEls = form.querySelectorAll(".js-paypal-manual");
+        var cmdEl = form.querySelector('[name="cmd"]');
+
+        if (hostedId && hbEl) {
+          cmdEl.value = "_s-xclick";
+          manualEls.forEach(function (el) {
+            el.removeAttribute("name");
+            el.disabled = true;
+          });
+          hbEl.disabled = false;
+          hbEl.setAttribute("name", "hosted_button_id");
+          hbEl.value = hostedId;
+        } else {
+          cmdEl.value = "_xclick";
+          if (hbEl) {
+            hbEl.disabled = true;
+            hbEl.value = "";
+            hbEl.removeAttribute("name");
+          }
+          manualEls.forEach(function (el) {
+            var fname = el.getAttribute("data-paypal-field");
+            if (!fname) return;
+            el.disabled = false;
+            el.setAttribute("name", fname);
+          });
+          form.querySelector('[data-paypal-field="business"]').value = String(c.business || "").trim();
+          form.querySelector('[data-paypal-field="item_name"]').value = plan.itemName;
+          form.querySelector('[data-paypal-field="amount"]').value = plan.amount;
+          form.querySelector('[data-paypal-field="currency_code"]').value = c.currency || "EUR";
+        }
+
+        var ret = form.querySelector('[name="return"]');
+        var can = form.querySelector('[name="cancel_return"]');
+        if (c.returnUrl && ret) {
+          ret.disabled = false;
+          ret.setAttribute("name", "return");
+          ret.value = c.returnUrl;
+        } else if (ret) {
+          ret.removeAttribute("name");
+          ret.disabled = true;
+        }
+        if (c.cancelUrl && can) {
+          can.disabled = false;
+          can.setAttribute("name", "cancel_return");
+          can.value = c.cancelUrl;
+        } else if (can) {
+          can.removeAttribute("name");
+          can.disabled = true;
+        }
+
+        var desc = document.querySelector('[data-plan-desc="' + planKey + '"]');
+        if (desc) {
+          var euros =
+            (c.currency || "EUR") === "EUR"
+              ? parseFloat(plan.amount).toLocaleString("it-IT", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                }) + " €"
+              : plan.amount + " " + (c.currency || "EUR");
+          desc.textContent = euros + " — " + plan.itemName;
+        }
+
+        var btn = form.querySelector("button[type=submit]");
+        if (btn) {
+          var label =
+            (c.currency || "EUR") === "EUR"
+              ? parseFloat(plan.amount).toLocaleString("it-IT", {
+                  minimumFractionDigits: 0,
+                  maximumFractionDigits: 2,
+                }) + " €"
+              : plan.amount + " " + (c.currency || "EUR");
+          btn.textContent = "Paga con PayPal — " + label;
+        }
+      }
+
+      wire("standard", "paypal-form-standard");
+      wire("pro", "paypal-form-pro");
+    })();
+  </script>
+</body>
+</html>

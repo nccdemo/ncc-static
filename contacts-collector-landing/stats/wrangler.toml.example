@@ -1,0 +1,14 @@
+# Rinomina in wrangler.toml e compila id namespace KV dopo:
+#   wrangler kv namespace create COUNTS
+
+name = "contacts-collector-stats"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[[kv_namespaces]]
+binding = "COUNTS"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+
+# Preferisci secret da CLI:
+#   wrangler secret put ADMIN_TOKEN
+#   wrangler secret put TRACK_SECRET
