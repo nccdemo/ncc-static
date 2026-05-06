@@ -510,6 +510,192 @@ Link utili:
 
     <section id="paypal">
       <h2>Pagamento PayPal</h2>
+      <p class="note" style="margin-bottom:1rem;">
+        Prima del pagamento inserisci i dati per l’emissione della <strong>fattura elettronica</strong>. Il sistema genera un codice ordine
+        e lo collega al pagamento PayPal.
+      </p>
+      <section id="fattura" aria-label="Dati fattura elettronica" style="padding:0 0 1.25rem;">
+        <div class="card" style="max-width:740px;">
+          <h3 style="margin:0 0 0.65rem;font-size:1rem;">Dati per fattura elettronica (Italia)</h3>
+          <p id="invoice-send-warning" class="note" style="display:none;margin:0 0 1rem;">
+            Invio email non configurato: compila pure i dati, verranno collegati al pagamento tramite codice ordine.
+            Per riceverli via email imposta <code>INVOICE_FORM_CONFIG.endpoint</code> in <code>invoice-form-config.js</code>.
+          </p>
+          <form id="invoice-form" novalidate>
+            <input type="hidden" name="order_id" id="invoice-order-id" value="" />
+            <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(260px,1fr));">
+              <div>
+                <div style="font-weight:600;margin-bottom:0.35rem;">Tipo cliente</div>
+                <label style="display:flex;gap:0.5rem;align-items:center;margin:0.25rem 0;">
+                  <input type="radio" name="client_type" value="company" checked />
+                  <span>Azienda / Professionista (P.IVA)</span>
+                </label>
+                <label style="display:flex;gap:0.5rem;align-items:center;margin:0.25rem 0;">
+                  <input type="radio" name="client_type" value="person" />
+                  <span>Persona fisica</span>
+                </label>
+              </div>
+              <div>
+                <div style="font-weight:600;margin-bottom:0.35rem;">Email (quella usata per PayPal)</div>
+                <input
+                  id="inv-email"
+                  name="email"
+                  type="email"
+                  autocomplete="email"
+                  required
+                  class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
+                  placeholder="nome@azienda.it"
+                />
+                <div class="text-xs text-rose-300 mt-1" data-err="email" style="display:none;"></div>
+              </div>
+              <div data-show="company">
+                <div style="font-weight:600;margin-bottom:0.35rem;">Ragione sociale</div>
+                <input
+                  id="inv-company"
+                  name="company_name"
+                  type="text"
+                  autocomplete="organization"
+                  class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
+                  placeholder="Nome azienda / Studio"
+                />
+                <div class="text-xs text-rose-300 mt-1" data-err="company_name" style="display:none;"></div>
+              </div>
+              <div data-show="person" style="display:none;">
+                <div style="font-weight:600;margin-bottom:0.35rem;">Nome e cognome</div>
+                <input
+                  id="inv-person"
+                  name="person_name"
+                  type="text"
+                  autocomplete="name"
+                  class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
+                  placeholder="Nome Cognome"
+                />
+                <div class="text-xs text-rose-300 mt-1" data-err="person_name" style="display:none;"></div>
+              </div>
+              <div data-show="company">
+                <div style="font-weight:600;margin-bottom:0.35rem;">Partita IVA</div>
+                <input
+                  id="inv-piva"
+                  name="vat_number"
+                  inputmode="numeric"
+                  class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
+                  placeholder="11 cifre (es. 01234567890)"
+                />
+                <div class="text-xs text-rose-300 mt-1" data-err="vat_number" style="display:none;"></div>
+              </div>
+              <div>
+                <div style="font-weight:600;margin-bottom:0.35rem;">Codice Fiscale</div>
+                <input
+                  id="inv-cf"
+                  name="fiscal_code"
+                  class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
+                  placeholder="16 caratteri (es. RSSMRA80A01H501U)"
+                />
+                <div class="text-xs text-rose-300 mt-1" data-err="fiscal_code" style="display:none;"></div>
+              </div>
+              <div style="grid-column:1/-1;">
+                <div style="font-weight:600;margin-bottom:0.35rem;">Indirizzo</div>
+                <input
+                  id="inv-address"
+                  name="address"
+                  type="text"
+                  autocomplete="street-address"
+                  required
+                  class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
+                  placeholder="Via, numero civico"
+                />
+                <div class="text-xs text-rose-300 mt-1" data-err="address" style="display:none;"></div>
+              </div>
+              <div>
+                <div style="font-weight:600;margin-bottom:0.35rem;">CAP</div>
+                <input
+                  id="inv-cap"
+                  name="cap"
+                  inputmode="numeric"
+                  required
+                  class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
+                  placeholder="90100"
+                />
+                <div class="text-xs text-rose-300 mt-1" data-err="cap" style="display:none;"></div>
+              </div>
+              <div>
+                <div style="font-weight:600;margin-bottom:0.35rem;">Comune</div>
+                <input
+                  id="inv-city"
+                  name="city"
+                  required
+                  class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
+                  placeholder="Palermo"
+                />
+                <div class="text-xs text-rose-300 mt-1" data-err="city" style="display:none;"></div>
+              </div>
+              <div>
+                <div style="font-weight:600;margin-bottom:0.35rem;">Provincia</div>
+                <input
+                  id="inv-prov"
+                  name="province"
+                  maxlength="2"
+                  required
+                  class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
+                  placeholder="PA"
+                />
+                <div class="text-xs text-rose-300 mt-1" data-err="province" style="display:none;"></div>
+              </div>
+              <div>
+                <div style="font-weight:600;margin-bottom:0.35rem;">Nazione</div>
+                <input
+                  id="inv-country"
+                  name="country"
+                  value="IT"
+                  maxlength="2"
+                  required
+                  class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
+                />
+                <div class="text-xs text-rose-300 mt-1" data-err="country" style="display:none;"></div>
+              </div>
+              <div>
+                <div style="font-weight:600;margin-bottom:0.35rem;">Codice Destinatario (SDI)</div>
+                <input
+                  id="inv-sdi"
+                  name="sdi"
+                  class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
+                  placeholder="7 caratteri (es. ABCDE12)"
+                />
+                <div class="text-xs text-rose-300 mt-1" data-err="sdi" style="display:none;"></div>
+              </div>
+              <div>
+                <div style="font-weight:600;margin-bottom:0.35rem;">PEC</div>
+                <input
+                  id="inv-pec"
+                  name="pec"
+                  type="email"
+                  class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
+                  placeholder="azienda@pec.it"
+                />
+                <div class="text-xs text-rose-300 mt-1" data-err="pec" style="display:none;"></div>
+              </div>
+              <div style="grid-column:1/-1;">
+                <label style="display:flex;gap:0.5rem;align-items:flex-start;">
+                  <input id="inv-privacy" name="privacy" type="checkbox" required style="margin-top:0.25rem;" />
+                  <span style="color:var(--muted);font-size:0.9rem;">
+                    Confermo di aver letto e accettato l’informativa privacy e autorizzo l’uso dei dati esclusivamente per fatturazione e supporto.
+                  </span>
+                </label>
+                <div class="text-xs text-rose-300 mt-1" data-err="privacy" style="display:none;"></div>
+              </div>
+            </div>
+            <div style="margin-top:1rem;display:flex;gap:0.75rem;flex-wrap:wrap;align-items:center;justify-content:space-between;">
+              <div style="color:var(--muted);font-size:0.85rem;">
+                Codice ordine: <code id="invoice-order-code"></code>
+              </div>
+              <button type="submit" class="btn btn-secondary" id="btn-invoice-save">Salva dati fattura</button>
+            </div>
+            <div id="invoice-ok" class="note" style="display:none;margin-top:1rem;border-style:solid;">
+              Dati salvati. Ora puoi completare il pagamento PayPal qui sotto.
+            </div>
+          </form>
+        </div>
+      </section>
       <p id="paypal-config-warning" class="note" style="display:none;margin-bottom:1rem;">
         Apri <code>paypal-config.js</code> e imposta <code>business</code> con la tua email PayPal Business (o Merchant ID). Salva e ricarica la pagina.
       </p>
@@ -522,6 +708,8 @@ Link utili:
             <input type="hidden" name="charset" value="utf-8" />
             <input type="hidden" name="lc" value="IT" />
             <input type="hidden" name="no_shipping" value="1" />
+            <input type="hidden" name="custom" value="" class="js-order-custom" />
+            <input type="hidden" name="invoice" value="" class="js-order-invoice" />
             <input type="hidden" value="" disabled class="js-paypal-hosted" />
             <input type="hidden" name="business" value="" class="js-paypal-manual" data-paypal-field="business" />
             <input type="hidden" name="item_name" value="" class="js-paypal-manual" data-paypal-field="item_name" />
@@ -540,6 +728,8 @@ Link utili:
             <input type="hidden" name="charset" value="utf-8" />
             <input type="hidden" name="lc" value="IT" />
             <input type="hidden" name="no_shipping" value="1" />
+            <input type="hidden" name="custom" value="" class="js-order-custom" />
+            <input type="hidden" name="invoice" value="" class="js-order-invoice" />
             <input type="hidden" value="" disabled class="js-paypal-hosted" />
             <input type="hidden" name="business" value="" class="js-paypal-manual" data-paypal-field="business" />
             <input type="hidden" name="item_name" value="" class="js-paypal-manual" data-paypal-field="item_name" />
@@ -570,12 +760,364 @@ Link utili:
       </div>
     </div>
   </footer>
+  <script src="./invoice-form-config.js"></script>
   <script src="./demo-config.js"></script>
   <script src="./paypal-config.js"></script>
   <script src="./stats-config.js"></script>
   <script src="./stats-track.js"></script>
   <script>
     document.getElementById("y").textContent = new Date().getFullYear();
+
+    (function invoiceFormInit() {
+      var cfg = window.INVOICE_FORM_CONFIG || {};
+      var endpoint = (cfg.endpoint && String(cfg.endpoint).trim()) || "";
+      var mode = (cfg.mode && String(cfg.mode).trim().toLowerCase()) || "json";
+      var fallback = (cfg.fallback && String(cfg.fallback).trim().toLowerCase()) || "mailto";
+      var mailtoTo = (cfg.mailtoTo && String(cfg.mailtoTo).trim()) || "distemanagement@pec.it";
+
+      var form = document.getElementById("invoice-form");
+      var warn = document.getElementById("invoice-send-warning");
+      var ok = document.getElementById("invoice-ok");
+      var btn = document.getElementById("btn-invoice-save");
+      var orderInput = document.getElementById("invoice-order-id");
+      var orderCode = document.getElementById("invoice-order-code");
+
+      if (!form || !orderInput || !orderCode) return;
+      if (!endpoint && warn) warn.style.display = "block";
+
+      function makeOrderId() {
+        try {
+          if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+        } catch (e) {}
+        return (
+          "ORD-" +
+          Math.random().toString(16).slice(2) +
+          "-" +
+          Date.now().toString(16) +
+          "-" +
+          Math.random().toString(16).slice(2)
+        ).toUpperCase();
+      }
+
+      function setOrderId(id) {
+        orderInput.value = id;
+        orderCode.textContent = id;
+        document.querySelectorAll(".js-order-custom").forEach(function (el) {
+          el.value = id;
+        });
+        document.querySelectorAll(".js-order-invoice").forEach(function (el) {
+          el.value = id;
+        });
+      }
+
+      function showErr(key, msg) {
+        var el = form.querySelector('[data-err="' + key + '"]');
+        if (!el) return;
+        el.textContent = msg;
+        el.style.display = msg ? "block" : "none";
+      }
+
+      function clearErrs() {
+        form.querySelectorAll("[data-err]").forEach(function (el) {
+          el.textContent = "";
+          el.style.display = "none";
+        });
+      }
+
+      function getClientType() {
+        var v = (form.querySelector('input[name="client_type"]:checked') || {}).value || "company";
+        return v === "person" ? "person" : "company";
+      }
+
+      function syncClientType() {
+        var t = getClientType();
+        form.querySelectorAll("[data-show]").forEach(function (el) {
+          var show = el.getAttribute("data-show");
+          el.style.display = show === t ? "" : "none";
+        });
+      }
+
+      function isEmailLike(s) {
+        s = String(s || "").trim();
+        return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s);
+      }
+
+      function isPiva(s) {
+        s = String(s || "").replace(/\s+/g, "");
+        return /^\d{11}$/.test(s);
+      }
+
+      function isCf(s) {
+        s = String(s || "").replace(/\s+/g, "").toUpperCase();
+        return /^[A-Z0-9]{16}$/.test(s);
+      }
+
+      function isCap(s) {
+        s = String(s || "").replace(/\s+/g, "");
+        return /^\d{5}$/.test(s);
+      }
+
+      function isProv(s) {
+        s = String(s || "").trim().toUpperCase();
+        return /^[A-Z]{2}$/.test(s);
+      }
+
+      function isSdi(s) {
+        s = String(s || "").trim().toUpperCase();
+        return /^[A-Z0-9]{7}$/.test(s);
+      }
+
+      function validate() {
+        clearErrs();
+        var t = getClientType();
+
+        var email = document.getElementById("inv-email").value;
+        var companyName = (document.getElementById("inv-company") || {}).value || "";
+        var personName = (document.getElementById("inv-person") || {}).value || "";
+        var piva = document.getElementById("inv-piva").value;
+        var cf = document.getElementById("inv-cf").value;
+        var address = document.getElementById("inv-address").value;
+        var cap = document.getElementById("inv-cap").value;
+        var city = document.getElementById("inv-city").value;
+        var prov = document.getElementById("inv-prov").value;
+        var country = document.getElementById("inv-country").value;
+        var sdi = document.getElementById("inv-sdi").value;
+        var pec = document.getElementById("inv-pec").value;
+        var privacy = document.getElementById("inv-privacy").checked;
+
+        var okAll = true;
+
+        if (!isEmailLike(email)) {
+          showErr("email", "Inserisci un’email valida.");
+          okAll = false;
+        }
+
+        if (t === "company") {
+          if (!String(companyName).trim()) {
+            showErr("company_name", "Inserisci la ragione sociale.");
+            okAll = false;
+          }
+          if (!isPiva(piva)) {
+            showErr("vat_number", "Partita IVA non valida (servono 11 cifre).");
+            okAll = false;
+          }
+        } else {
+          if (!String(personName).trim()) {
+            showErr("person_name", "Inserisci nome e cognome.");
+            okAll = false;
+          }
+          if (!isCf(cf)) {
+            showErr("fiscal_code", "Codice fiscale non valido (16 caratteri).");
+            okAll = false;
+          }
+        }
+
+        if (cf && !isCf(cf)) {
+          showErr("fiscal_code", "Codice fiscale non valido (16 caratteri).");
+          okAll = false;
+        }
+
+        if (!String(address).trim()) {
+          showErr("address", "Inserisci l’indirizzo.");
+          okAll = false;
+        }
+        if (!isCap(cap)) {
+          showErr("cap", "CAP non valido (5 cifre).");
+          okAll = false;
+        }
+        if (!String(city).trim()) {
+          showErr("city", "Inserisci il comune.");
+          okAll = false;
+        }
+        if (!isProv(prov)) {
+          showErr("province", "Provincia non valida (2 lettere).");
+          okAll = false;
+        }
+        if (!String(country).trim() || !/^[A-Za-z]{2}$/.test(String(country).trim())) {
+          showErr("country", "Nazione non valida (2 lettere, es. IT).");
+          okAll = false;
+        }
+
+        var sdiOk = !String(sdi || "").trim() || isSdi(sdi);
+        var pecOk = !String(pec || "").trim() || isEmailLike(pec);
+        if (!sdiOk) {
+          showErr("sdi", "Codice SDI non valido (7 caratteri).");
+          okAll = false;
+        }
+        if (!pecOk) {
+          showErr("pec", "PEC non valida (formato email).");
+          okAll = false;
+        }
+        if (!String(sdi || "").trim() && !String(pec || "").trim()) {
+          showErr("sdi", "Inserisci SDI oppure PEC (almeno uno).");
+          showErr("pec", "Inserisci PEC oppure SDI (almeno uno).");
+          okAll = false;
+        }
+
+        if (!privacy) {
+          showErr("privacy", "Devi accettare l’informativa privacy.");
+          okAll = false;
+        }
+        return okAll;
+      }
+
+      function serialize() {
+        var fd = new FormData(form);
+        var obj = {};
+        fd.forEach(function (v, k) {
+          obj[k] = v;
+        });
+        return obj;
+      }
+
+      function toMailto(payload) {
+        var subject = "Dati fattura elettronica — Ordine " + (payload.order_id || "");
+        var lines = [];
+        lines.push("Ordine: " + (payload.order_id || ""));
+        lines.push("Data (UTC): " + (payload.timestamp_utc || ""));
+        lines.push("");
+        lines.push("=== DATI CLIENTE ===");
+        lines.push("Tipo cliente: " + (payload.client_type || ""));
+        lines.push("Email (PayPal): " + (payload.email || ""));
+        if ((payload.client_type || "") === "company") {
+          lines.push("Ragione sociale: " + (payload.company_name || ""));
+          lines.push("Partita IVA: " + (payload.vat_number || ""));
+        } else {
+          lines.push("Nome e cognome: " + (payload.person_name || ""));
+        }
+        lines.push("Codice fiscale: " + (payload.fiscal_code || ""));
+        lines.push("");
+        lines.push("=== INDIRIZZO ===");
+        lines.push("Indirizzo: " + (payload.address || ""));
+        lines.push("CAP: " + (payload.cap || ""));
+        lines.push("Comune: " + (payload.city || ""));
+        lines.push("Provincia: " + (payload.province || ""));
+        lines.push("Nazione: " + (payload.country || ""));
+        lines.push("");
+        lines.push("=== FATTURA ELETTRONICA ===");
+        lines.push("SDI: " + (payload.sdi || ""));
+        lines.push("PEC: " + (payload.pec || ""));
+        lines.push("");
+        lines.push("NOTE: pagamento PayPal associato tramite custom/invoice = " + (payload.order_id || ""));
+
+        var body = lines.join("\n");
+        var href =
+          "mailto:" +
+          encodeURIComponent(mailtoTo) +
+          "?subject=" +
+          encodeURIComponent(subject) +
+          "&body=" +
+          encodeURIComponent(body);
+        return href;
+      }
+
+      function postData(payload) {
+        if (!endpoint) return Promise.resolve({ skipped: true });
+        if (mode === "form") {
+          var fd = new FormData();
+          Object.keys(payload).forEach(function (k) {
+            fd.append(k, payload[k]);
+          });
+          return fetch(endpoint, { method: "POST", body: fd, mode: "cors" });
+        }
+        return fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+          mode: "cors",
+        });
+      }
+
+      if (!orderInput.value) setOrderId(makeOrderId());
+      syncClientType();
+      form.querySelectorAll('input[name="client_type"]').forEach(function (el) {
+        el.addEventListener("change", syncClientType);
+      });
+
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (!validate()) return;
+
+        var payload = serialize();
+        payload.timestamp_utc = new Date().toISOString();
+        payload.user_agent = navigator.userAgent || "";
+
+        // Persist locale (utile come backup)
+        try {
+          localStorage.setItem("invoice_" + payload.order_id, JSON.stringify(payload));
+        } catch (e) {}
+
+        // Se non c'è endpoint, fallback (mailto) per inviare davvero i dati.
+        if (!endpoint && fallback === "mailto") {
+          var href = toMailto(payload);
+          if (btn) {
+            btn.disabled = true;
+            btn.textContent = "Apro email…";
+          }
+          window.location.href = href;
+          if (ok) ok.style.display = "block";
+          if (btn) {
+            setTimeout(function () {
+              btn.disabled = false;
+              btn.textContent = "Apri email (PEC) con i dati";
+            }, 800);
+          }
+          return;
+        }
+
+        if (!endpoint && fallback === "none") {
+          if (ok) ok.style.display = "block";
+          return;
+        }
+
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = "Invio…";
+        }
+        postData(payload)
+          .then(function () {
+            if (ok) ok.style.display = "block";
+          })
+          .catch(function () {
+            window.alert("Invio dati non riuscito. Puoi comunque completare il pagamento: il codice ordine resta collegato.");
+          })
+          .finally(function () {
+            if (btn) {
+              btn.disabled = false;
+              btn.textContent = "Invia dati fattura";
+            }
+          });
+      });
+
+      function ensureSavedBeforePay() {
+        if (!validate()) {
+          var sec = document.getElementById("fattura");
+          if (sec && sec.scrollIntoView) sec.scrollIntoView({ behavior: "smooth", block: "start" });
+          return false;
+        }
+        if (ok && ok.style.display !== "block") {
+          // Richiede almeno un'azione di invio (endpoint o mailto) prima di PayPal.
+          form.dispatchEvent(new Event("submit", { cancelable: true }));
+        }
+        return true;
+      }
+
+      ["paypal-form-standard", "paypal-form-pro"].forEach(function (fid) {
+        var pf = document.getElementById(fid);
+        if (!pf) return;
+        pf.addEventListener("submit", function (e) {
+          if (!ensureSavedBeforePay()) {
+            e.preventDefault();
+          }
+        });
+      });
+
+      // Etichette pulsante: endpoint vs mailto
+      if (btn) {
+        if (!endpoint && fallback === "mailto") btn.textContent = "Apri email (PEC) con i dati";
+        else btn.textContent = "Invia dati fattura";
+      }
+    })();
 
     (function setupPlacesGuideCopy() {
       var btn = document.getElementById("btn-copy-places-guide");
