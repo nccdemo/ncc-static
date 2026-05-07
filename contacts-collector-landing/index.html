@@ -572,24 +572,13 @@ Link utili:
                 />
                 <div class="text-xs text-rose-300 mt-1" data-err="person_name" style="display:none;"></div>
               </div>
-              <div data-show="company">
-                <div style="font-weight:600;margin-bottom:0.35rem;">Partita IVA</div>
-                <input
-                  id="inv-piva"
-                  name="vat_number"
-                  inputmode="numeric"
-                  class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
-                  placeholder="11 cifre (es. 01234567890)"
-                />
-                <div class="text-xs text-rose-300 mt-1" data-err="vat_number" style="display:none;"></div>
-              </div>
               <div>
-                <div style="font-weight:600;margin-bottom:0.35rem;">Codice Fiscale</div>
+                <div style="font-weight:600;margin-bottom:0.35rem;">Codice Fiscale o Partita IVA</div>
                 <input
                   id="inv-cf"
                   name="fiscal_code"
                   class="w-full rounded-lg bg-slate-900/60 ring-1 ring-white/10 px-3 py-2 text-slate-100"
-                  placeholder="16 caratteri (es. RSSMRA80A01H501U)"
+                  placeholder="CF (16 caratteri) oppure P.IVA (11 cifre)"
                 />
                 <div class="text-xs text-rose-300 mt-1" data-err="fiscal_code" style="display:none;"></div>
               </div>
@@ -653,7 +642,7 @@ Link utili:
                 />
                 <div class="text-xs text-rose-300 mt-1" data-err="country" style="display:none;"></div>
               </div>
-              <div>
+              <div data-show="company">
                 <div style="font-weight:600;margin-bottom:0.35rem;">Codice Destinatario (SDI)</div>
                 <input
                   id="inv-sdi"
@@ -664,7 +653,7 @@ Link utili:
                 <div class="text-xs text-rose-300 mt-1" data-err="sdi" style="display:none;"></div>
               </div>
               <div>
-                <div style="font-weight:600;margin-bottom:0.35rem;">PEC</div>
+                <div id="inv-pec-label" style="font-weight:600;margin-bottom:0.35rem;">PEC</div>
                 <input
                   id="inv-pec"
                   name="pec"
@@ -835,6 +824,18 @@ Link utili:
           var show = el.getAttribute("data-show");
           el.style.display = show === t ? "" : "none";
         });
+
+        var pecLabel = document.getElementById("inv-pec-label");
+        var pecInput = document.getElementById("inv-pec");
+        if (pecLabel && pecInput) {
+          if (t === "person") {
+            pecLabel.textContent = "Email";
+            pecInput.placeholder = "nome@email.it";
+          } else {
+            pecLabel.textContent = "PEC";
+            pecInput.placeholder = "azienda@pec.it";
+          }
+        }
       }
 
       function isEmailLike(s) {
@@ -850,6 +851,11 @@ Link utili:
       function isCf(s) {
         s = String(s || "").replace(/\s+/g, "").toUpperCase();
         return /^[A-Z0-9]{16}$/.test(s);
+      }
+
+      function isTaxId(s) {
+        s = String(s || "").trim();
+        return isPiva(s) || isCf(s);
       }
 
       function isCap(s) {
@@ -874,7 +880,6 @@ Link utili:
         var email = document.getElementById("inv-email").value;
         var companyName = (document.getElementById("inv-company") || {}).value || "";
         var personName = (document.getElementById("inv-person") || {}).value || "";
-        var piva = document.getElementById("inv-piva").value;
         var cf = document.getElementById("inv-cf").value;
         var address = document.getElementById("inv-address").value;
         var cap = document.getElementById("inv-cap").value;
@@ -897,8 +902,8 @@ Link utili:
             showErr("company_name", "Inserisci la ragione sociale.");
             okAll = false;
           }
-          if (!isPiva(piva)) {
-            showErr("vat_number", "Partita IVA non valida (servono 11 cifre).");
+          if (!isPiva(cf)) {
+            showErr("fiscal_code", "Per azienda serve una Partita IVA valida (11 cifre).");
             okAll = false;
           }
         } else {
@@ -906,14 +911,14 @@ Link utili:
             showErr("person_name", "Inserisci nome e cognome.");
             okAll = false;
           }
-          if (!isCf(cf)) {
-            showErr("fiscal_code", "Codice fiscale non valido (16 caratteri).");
+          if (!isTaxId(cf)) {
+            showErr("fiscal_code", "Inserisci un Codice Fiscale (16 caratteri) oppure una Partita IVA (11 cifre).");
             okAll = false;
           }
         }
 
-        if (cf && !isCf(cf)) {
-          showErr("fiscal_code", "Codice fiscale non valido (16 caratteri).");
+        if (cf && !isTaxId(cf)) {
+          showErr("fiscal_code", "Codice fiscale/P.IVA non valido.");
           okAll = false;
         }
 
@@ -948,10 +953,16 @@ Link utili:
           showErr("pec", "PEC non valida (formato email).");
           okAll = false;
         }
-        if (!String(sdi || "").trim() && !String(pec || "").trim()) {
-          showErr("sdi", "Inserisci SDI oppure PEC (almeno uno).");
-          showErr("pec", "Inserisci PEC oppure SDI (almeno uno).");
-          okAll = false;
+        if (t === "company") {
+          if (!String(pec || "").trim()) {
+            showErr("pec", "Per azienda inserisci la PEC.");
+            okAll = false;
+          }
+        } else {
+          if (!String(pec || "").trim()) {
+            showErr("pec", "Inserisci l’email.");
+            okAll = false;
+          }
         }
 
         if (!privacy) {
@@ -981,11 +992,11 @@ Link utili:
         lines.push("Email (PayPal): " + (payload.email || ""));
         if ((payload.client_type || "") === "company") {
           lines.push("Ragione sociale: " + (payload.company_name || ""));
-          lines.push("Partita IVA: " + (payload.vat_number || ""));
+          lines.push("Partita IVA: " + (payload.fiscal_code || ""));
         } else {
           lines.push("Nome e cognome: " + (payload.person_name || ""));
         }
-        lines.push("Codice fiscale: " + (payload.fiscal_code || ""));
+        lines.push("Codice fiscale / Partita IVA: " + (payload.fiscal_code || ""));
         lines.push("");
         lines.push("=== INDIRIZZO ===");
         lines.push("Indirizzo: " + (payload.address || ""));
@@ -1054,12 +1065,20 @@ Link utili:
             btn.disabled = true;
             btn.textContent = "Apro email…";
           }
-          window.location.href = href;
+          try {
+            window.open(href, "_blank", "noopener");
+          } catch (e) {
+            window.location.href = href;
+          }
           if (ok) ok.style.display = "block";
+          try {
+            var paypal = document.getElementById("paypal");
+            if (paypal && paypal.scrollIntoView) paypal.scrollIntoView({ behavior: "smooth", block: "start" });
+          } catch (e) {}
           if (btn) {
             setTimeout(function () {
               btn.disabled = false;
-              btn.textContent = "Apri email (PEC) con i dati";
+              btn.textContent = "Apri email con i dati";
             }, 800);
           }
           return;
@@ -1114,7 +1133,7 @@ Link utili:
 
       // Etichette pulsante: endpoint vs mailto
       if (btn) {
-        if (!endpoint && fallback === "mailto") btn.textContent = "Apri email (PEC) con i dati";
+        if (!endpoint && fallback === "mailto") btn.textContent = "Apri email con i dati";
         else btn.textContent = "Invia dati fattura";
       }
     })();
