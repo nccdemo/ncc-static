@@ -762,7 +762,10 @@ Link utili:
       var endpoint = (cfg.endpoint && String(cfg.endpoint).trim()) || "";
       var mode = (cfg.mode && String(cfg.mode).trim().toLowerCase()) || "json";
       var fallback = (cfg.fallback && String(cfg.fallback).trim().toLowerCase()) || "mailto";
-      var mailtoTo = (cfg.mailtoTo && String(cfg.mailtoTo).trim()) || "distemanagement@pec.it";
+      var mailtoToCompany =
+        (cfg.mailtoToCompany && String(cfg.mailtoToCompany).trim()) || (cfg.mailtoTo && String(cfg.mailtoTo).trim()) || "distemanagement@pec.it";
+      var mailtoToPerson =
+        (cfg.mailtoToPerson && String(cfg.mailtoToPerson).trim()) || (cfg.mailtoTo && String(cfg.mailtoTo).trim()) || "info@distemanagement.com";
 
       var form = document.getElementById("invoice-form");
       var warn = document.getElementById("invoice-send-warning");
@@ -983,6 +986,7 @@ Link utili:
 
       function toMailto(payload) {
         var subject = "Dati fattura elettronica — Ordine " + (payload.order_id || "");
+        var to = (payload.client_type || "") === "company" ? mailtoToCompany : mailtoToPerson;
         var lines = [];
         lines.push("Ordine: " + (payload.order_id || ""));
         lines.push("Data (UTC): " + (payload.timestamp_utc || ""));
@@ -1014,7 +1018,7 @@ Link utili:
         var body = lines.join("\n");
         var href =
           "mailto:" +
-          encodeURIComponent(mailtoTo) +
+          encodeURIComponent(to) +
           "?subject=" +
           encodeURIComponent(subject) +
           "&body=" +

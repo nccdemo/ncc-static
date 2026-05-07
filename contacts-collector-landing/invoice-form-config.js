@@ -16,7 +16,8 @@ window.INVOICE_FORM_CONFIG = {
    * - "none": nessuna azione (sconsigliato).
    */
   fallback: "mailto",
-  /** Destinatario email (PEC). */
-  mailtoTo: "distemanagement@pec.it",
+  /** Destinatari email per fallback "mailto". */
+  mailtoToCompany: "distemanagement@pec.it",
+  mailtoToPerson: "info@distemanagement.com",
 };
 
